@@ -1,0 +1,18 @@
+# 编译产物
+bin/
+obj/
+build/
+*.binlog
+publish/
+
+# 运行期数据（配置、语言、图标、启动器数据）
+data/
+src/DaenLauncher/data/
+
+# 删除前的备份区（见 AGENTS.md 第八节）
+.trash/
+
+# IDE
+.vs/
+*.user
+*.suo

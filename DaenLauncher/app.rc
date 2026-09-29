@@ -1,0 +1,7 @@
+// Win32 资源：应用图标 + 应用清单
+// 由 rc.exe（Windows SDK BuildTools NuGet 包）编译为 app.res
+// 说明：WinUI 构建会用清单覆盖 /win32icon 嵌入的图标，所以用完整 .res 绕过
+// 注意：.rc 里路径分隔符必须用正斜杠（反斜杠会被当转义）
+1 ICON "Assets/logo/app.ico"
+
+1 24 "app.manifest"

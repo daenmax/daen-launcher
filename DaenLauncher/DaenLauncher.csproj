@@ -1,0 +1,49 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows10.0.22621.0</TargetFramework>
+    <TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
+    <RootNamespace>DaenLauncher</RootNamespace>
+    <Platforms>x86;x64;ARM64</Platforms>
+    <RuntimeIdentifiers>win-x86;win-x64;win-arm64</RuntimeIdentifiers>
+    <UseWinUI>true</UseWinUI>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets\logo\logo_图标组.ico</ApplicationIcon>
+    <EnableMsixTooling>true</EnableMsixTooling>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <WindowsPackageType>None</WindowsPackageType>
+    <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
+    <SelfContained>true</SelfContained>
+    <!-- 单文件发布需要的属性 -->
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <DefaultLanguage>zh-CN</DefaultLanguage>
+    <Version>1.0.0</Version>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.5.1" />
+    <PackageReference Include="H.NotifyIcon.WinUI" Version="2.5.0-beta.3" />
+    <!-- Windows Community Toolkit：WrapPanel 等控件 -->
+    <PackageReference Include="CommunityToolkit.WinUI.UI.Controls.Primitives" Version="7.1.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- System.Drawing 用于提取 exe/文件/文件夹图标 -->
+    <FrameworkReference Include="Microsoft.WindowsDesktop.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 以下文件全部作为 EmbeddedResource 嵌入 exe（需求第7条） -->
+    <EmbeddedResource Include="Assets\logo\logo_1024.png" />
+    <EmbeddedResource Include="Assets\logo\logo_64.png" />
+    <EmbeddedResource Include="Assets\logo\logo_图标组.ico" />
+    <EmbeddedResource Include="Assets\Icons\*.png" />
+    <EmbeddedResource Include="Assets\appconfig.json" />
+    <EmbeddedResource Include="Languages\*.json" />
+  </ItemGroup>
+
+</Project>
