@@ -267,3 +267,15 @@ public enum SubCategoryStyle
     /// <summary>卡片风格</summary>
     Card
 }
+
+/// <summary>
+/// 子分类 Tab 的视觉风格（仅 Tab 风格下有效，第二十轮优化6 新增）。
+/// </summary>
+public enum SubCategoryTabVisualStyle
+{
+    /// <summary>选择夹风格（系统 TabView 标签页，原来的样子）</summary>
+    Classic,
+
+    /// <summary>选中风格（按钮式标签，选中项高亮 + 底部蓝色横条；默认）</summary>
+    Highlight
+}

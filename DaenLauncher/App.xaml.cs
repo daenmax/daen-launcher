@@ -36,6 +36,7 @@ public partial class App : Application
 
     private MainWindow? _mainWindow;
     private SettingsWindow? _settingsWindow;
+    private TodoWindow? _todoWindow;
 
     public App()
     {
@@ -130,6 +131,9 @@ public partial class App : Application
         // ===== 语言切换：托盘菜单文字实时刷新 =====
         LocalizationService.LanguageChanged += RefreshTrayLocalization;
 
+        // ===== 待办：从磁盘加载本地数据（云同步开启时窗口打开后以云端为准） =====
+        TodoService.Instance.LoadLocal();
+
         // ===== 项目完整性检测（仅在软件启动时执行一次，失效项目显示"项目无法找到"图标，需求-优化1）=====
         LauncherDataService.Instance.CheckMissingItems();
 
@@ -181,6 +185,28 @@ public partial class App : Application
         _settingsWindow?.NavigateToAbout();
     }
 
+    /// <summary>打开待办窗口（单例）</summary>
+    public void ShowTodoWindow()
+    {
+        if (_todoWindow == null)
+        {
+            _todoWindow = new TodoWindow();
+            _todoWindow.Closed += (_, _) => _todoWindow = null;
+        }
+        _todoWindow.ActivateAndBringToFront();
+    }
+
+    /// <summary>显示/隐藏待办窗口切换（待办快捷键，默认 Alt+2）</summary>
+    public void ToggleTodoWindow()
+    {
+        if (_todoWindow == null)
+        {
+            ShowTodoWindow();
+            return;
+        }
+        _todoWindow.ToggleViaHotkey();
+    }
+
     #endregion
 
     #region 热键
@@ -196,23 +222,35 @@ public partial class App : Application
     {
         _hotkeyWindow = new MessageWindow();
         _hotkeyWindow.Create();
-        _hotkeyWindow.MessageReceived += (msg, _, _) => Win32Helper.HandleHotkeyMessage(msg);
+        // WM_HOTKEY 的 wParam 是注册时的热键 id，按 id 分发到主窗口/待办窗口
+        _hotkeyWindow.MessageReceived += (msg, wParam, _) => Win32Helper.HandleHotkeyMessage(msg, wParam);
         Win32Helper.HotkeyPressed += ToggleMainWindow;
+        Win32Helper.TodoHotkeyPressed += ToggleTodoWindow;
         RegisterHotkey();
     }
 
-    /// <summary>按当前设置注册/注销全局热键</summary>
+    /// <summary>按当前设置注册/注销全局热键（主窗口 + 待办窗口两个热键）</summary>
     public void RegisterHotkey()
     {
         if (_hotkeyWindow == null || _hotkeyWindow.Handle == IntPtr.Zero) return;
         var settings = SettingsService.Instance.Settings;
 
-        Win32Helper.UnregisterHotKeyId(_hotkeyWindow.Handle, 1);
+        // 主窗口热键（id=1）
+        Win32Helper.UnregisterHotKeyId(_hotkeyWindow.Handle, Win32Helper.HotkeyIdMain);
         if (settings.TriggerHotkey)
         {
-            Win32Helper.RegisterHotKeyId(_hotkeyWindow.Handle, 1,
+            Win32Helper.RegisterHotKeyId(_hotkeyWindow.Handle, Win32Helper.HotkeyIdMain,
                 (uint)(settings.HotkeyModifiers | Win32Helper.MOD_NOREPEAT),
                 (uint)settings.HotkeyVirtualKey);
+        }
+
+        // 待办窗口热键（id=2）
+        Win32Helper.UnregisterHotKeyId(_hotkeyWindow.Handle, Win32Helper.HotkeyIdTodo);
+        if (settings.TodoTriggerHotkey)
+        {
+            Win32Helper.RegisterHotKeyId(_hotkeyWindow.Handle, Win32Helper.HotkeyIdTodo,
+                (uint)(settings.TodoHotkeyModifiers | Win32Helper.MOD_NOREPEAT),
+                (uint)settings.TodoHotkeyVirtualKey);
         }
     }
 
@@ -239,6 +277,7 @@ public partial class App : Application
 
         try { _mainWindow?.Close(); } catch { /* 忽略 */ }
         try { _settingsWindow?.Close(); } catch { /* 忽略 */ }
+        try { _todoWindow?.Close(); } catch { /* 忽略 */ }
 
         _singleInstanceMutex?.ReleaseMutex();
         Current.Exit();
@@ -265,6 +304,11 @@ public partial class App : Application
             ThemeService.Apply((FrameworkElement)_settingsWindow.Content, mode);
             ThemeService.ApplyCaptionButtonColors(_settingsWindow.AppWindow, (FrameworkElement)_settingsWindow.Content);
         }
+        if (_todoWindow != null)
+        {
+            ThemeService.Apply((FrameworkElement)_todoWindow.Content, mode);
+            ThemeService.ApplyCaptionButtonColors(_todoWindow.AppWindow, (FrameworkElement)_todoWindow.Content);
+        }
     }
 
     /// <summary>只刷新主窗口面板显示（子分类风格/布局/尺寸等显示参数变化时调用）</summary>
@@ -285,17 +329,58 @@ public partial class App : Application
         _mainWindow?.ApplyBehaviorSettings();
     }
 
+    /// <summary>只应用待办窗口行为设置（置顶/锁定尺寸变化时调用）</summary>
+    public void ApplyTodoWindowBehavior()
+    {
+        _todoWindow?.ApplyBehaviorSettings();
+    }
+
+    /// <summary>云同步设置变化（设置页保存/关闭云同步）时通知待办窗口立即响应：
+    /// 显示/隐藏"云同步"按钮并自动刷新一次（需求：不用关开窗口）</summary>
+    public void OnTodoSyncSettingsChanged()
+    {
+        _todoWindow?.OnSyncSettingsChanged();
+    }
+
+    /// <summary>外部变化（重要底色设置、删除/导入 todo 数据）后刷新待办窗口视图</summary>
+    public void RefreshTodoWindowView()
+    {
+        _todoWindow?.RefreshView();
+    }
+
+    /// <summary>重建主窗口左下角附属功能栏（设置-常规里勾选/排序后调用）</summary>
+    public void RefreshAuxiliaryBar()
+    {
+        _mainWindow?.RebuildAuxiliaryBar();
+    }
+
+    /// <summary>把窗口材质应用到所有已创建的窗口（设置-外观切换材质后立即生效）</summary>
+    public void ApplyBackdropEverywhere()
+    {
+        var backdrop = SettingsService.Instance.Settings.Backdrop;
+        BackdropService.Apply(GetMainWindow(), backdrop);
+        if (_settingsWindow != null)
+        {
+            BackdropService.Apply(_settingsWindow, backdrop);
+        }
+        if (_todoWindow != null)
+        {
+            BackdropService.Apply(_todoWindow, backdrop);
+        }
+    }
+
     /// <summary>只刷新主窗口标题（自定义标题变化时调用）</summary>
     public void RefreshMainWindowTitle()
     {
         _mainWindow?.RefreshTitle();
     }
 
-    /// <summary>刷新所有窗口的标题和托盘提示（自定义标题确认后调用，需求-BUG3）</summary>
+    /// <summary>刷新所有窗口的标题和托盘提示（自定义标题确认后调用，需求-BUG3；新窗口都要接入联动）</summary>
     public void RefreshAllTitles()
     {
         _mainWindow?.RefreshTitle();
         _settingsWindow?.RefreshTitle();
+        _todoWindow?.RefreshTitle();
         _trayService?.RefreshTooltip();
     }
 

@@ -100,8 +100,17 @@ public static class Win32Helper
         public int Bottom;
     }
 
-    /// <summary>热键回调：收到 WM_HOTKEY 时触发</summary>
+    /// <summary>热键回调：收到 WM_HOTKEY 时触发（主窗口热键，id=1）</summary>
     public static event Action? HotkeyPressed;
+
+    /// <summary>热键回调：待办窗口热键（id=2）触发</summary>
+    public static event Action? TodoHotkeyPressed;
+
+    /// <summary>热键 id：主窗口 显示/隐藏</summary>
+    public const int HotkeyIdMain = 1;
+
+    /// <summary>热键 id：待办窗口 显示/隐藏</summary>
+    public const int HotkeyIdTodo = 2;
 
     private static readonly Dictionary<long, SUBCLASSPROC> SubclassProcs = new();
     private static long _nextSubclassId = 1;
@@ -154,12 +163,19 @@ public static class Win32Helper
         SetWindowLongPtr(hWnd, GWL_STYLE, style);
     }
 
-    /// <summary>处理 WM_HOTKEY 消息（供子类化处理器调用）</summary>
-    public static bool HandleHotkeyMessage(uint uMsg)
+    /// <summary>处理 WM_HOTKEY 消息（供子类化处理器调用），按 wParam 里的热键 id 分发</summary>
+    public static bool HandleHotkeyMessage(uint uMsg, IntPtr wParam)
     {
         if (uMsg == WM_HOTKEY)
         {
-            HotkeyPressed?.Invoke();
+            if (wParam.ToInt64() == HotkeyIdTodo)
+            {
+                TodoHotkeyPressed?.Invoke();
+            }
+            else
+            {
+                HotkeyPressed?.Invoke();
+            }
             return true;
         }
         return false;

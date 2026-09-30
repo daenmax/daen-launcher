@@ -17,6 +17,167 @@ public sealed class GeneralPage : SettingsPageBase
         BuildLanguageCard();
         BuildAutoStartCard();
         BuildStartBehaviorCard();
+        BuildAuxiliaryCard();
+    }
+
+    /// <summary>附属功能卡片（需求）：勾选显示在启动器左下角的功能（最多 3 个），
+    /// 并可上下调整顺序；未勾选的通过底栏"更多"菜单访问。
+    /// 行顺序 = 已勾选（按存储顺序）在前 + 未勾选（注册表顺序）在后。</summary>
+    private void BuildAuxiliaryCard()
+    {
+        var list = new StackPanel { Spacing = 4 };
+        var maxHint = new TextBlock
+        {
+            Text = LocalizationService.Tr("Settings.Auxiliary.MaxHint"),
+            FontSize = 12,
+            Opacity = 0.7,
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 6, 0, 0)
+        };
+
+        void Rebuild()
+        {
+            list.Children.Clear();
+            // 只保留注册表里还有定义的 id（防止注册表变化后残留脏数据）
+            var visible = _settings.AuxiliaryVisible
+                .Where(id => AuxiliaryFeatures.All.Any(f => f.Id == id))
+                .ToList();
+            var hidden = AuxiliaryFeatures.All
+                .Where(f => !visible.Contains(f.Id))
+                .ToList();
+
+            for (var i = 0; i < visible.Count; i++)
+            {
+                var feature = AuxiliaryFeatures.All.First(f => f.Id == visible[i]);
+                var isFirst = i == 0;
+                var isLast = i == visible.Count - 1;
+                list.Children.Add(BuildAuxiliaryRow(feature, true, isFirst, isLast, Rebuild));
+            }
+            foreach (var feature in hidden)
+            {
+                list.Children.Add(BuildAuxiliaryRow(feature, false, false, false, Rebuild));
+            }
+        }
+
+        Rebuild();
+
+        var content = new StackPanel();
+        content.Children.Add(list);
+        content.Children.Add(maxHint);
+        MakeCard(FluentGlyphs.AllApps, "Settings.Auxiliary", "Settings.Auxiliary.Sub", content);
+    }
+
+    /// <summary>构建附属功能的一行：显示勾选框 + 图标名称 + 上移/下移按钮。
+    /// rebuild：勾选/排序变化后重建整个列表（传入 BuildAuxiliaryCard 里的 Rebuild）。</summary>
+    private Grid BuildAuxiliaryRow(AuxiliaryFeature feature, bool isVisible,
+        bool isFirst, bool isLast, Action rebuild)
+    {
+        var row = new Grid { ColumnSpacing = 8 };
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        // 显示勾选框（勾选 = 加到显示列表末尾；超过 3 个则拒绝并提示）
+        var check = new CheckBox
+        {
+            Content = LocalizationService.Tr("Settings.Auxiliary.Show"),
+            IsChecked = isVisible,
+            MinWidth = 88,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        check.Checked += async (_, _) =>
+        {
+            if (_settings.AuxiliaryVisible.Count >= AuxiliaryFeatures.MaxVisible)
+            {
+                check.IsChecked = false;
+                await ShowMaxReachedAsync();
+                return;
+            }
+            _settings.AuxiliaryVisible.Add(feature.Id);
+            SettingsService.Instance.Save();
+            App.Instance.RefreshAuxiliaryBar();
+            rebuild();
+        };
+        check.Unchecked += (_, _) =>
+        {
+            _settings.AuxiliaryVisible.Remove(feature.Id);
+            SettingsService.Instance.Save();
+            App.Instance.RefreshAuxiliaryBar();
+            rebuild();
+        };
+        Grid.SetColumn(check, 0);
+        row.Children.Add(check);
+
+        // 图标 + 名称
+        var namePanel = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, VerticalAlignment = VerticalAlignment.Center };
+        var icon = new ImageIcon { Width = 20, Height = 20 };
+        namePanel.Children.Add(icon);
+        _ = LoadAuxiliaryRowIconAsync(icon, feature.IconResource);
+        namePanel.Children.Add(new TextBlock
+        {
+            Text = LocalizationService.Tr(feature.NameKey),
+            VerticalAlignment = VerticalAlignment.Center
+        });
+        Grid.SetColumn(namePanel, 1);
+        row.Children.Add(namePanel);
+
+        // 上移/下移（只有已勾选的行可移动；在显示列表内交换顺序）
+        var upButton = new Button
+        {
+            Content = new FontIcon { Glyph = "\uE70E", FontSize = 11 }, // ChevronUp
+            Width = 32, Height = 30, Padding = new Thickness(0),
+            IsEnabled = isVisible && !isFirst
+        };
+        var downButton = new Button
+        {
+            Content = new FontIcon { Glyph = "\uE70D", FontSize = 11 }, // ChevronDown
+            Width = 32, Height = 30, Padding = new Thickness(0),
+            IsEnabled = isVisible && !isLast
+        };
+        var index = _settings.AuxiliaryVisible.IndexOf(feature.Id);
+        upButton.Click += (_, _) =>
+        {
+            if (index <= 0) return;
+            (_settings.AuxiliaryVisible[index - 1], _settings.AuxiliaryVisible[index]) =
+                (_settings.AuxiliaryVisible[index], _settings.AuxiliaryVisible[index - 1]);
+            SettingsService.Instance.Save();
+            App.Instance.RefreshAuxiliaryBar();
+            rebuild();
+        };
+        downButton.Click += (_, _) =>
+        {
+            if (index < 0 || index >= _settings.AuxiliaryVisible.Count - 1) return;
+            (_settings.AuxiliaryVisible[index + 1], _settings.AuxiliaryVisible[index]) =
+                (_settings.AuxiliaryVisible[index], _settings.AuxiliaryVisible[index + 1]);
+            SettingsService.Instance.Save();
+            App.Instance.RefreshAuxiliaryBar();
+            rebuild();
+        };
+        Grid.SetColumn(upButton, 2);
+        Grid.SetColumn(downButton, 3);
+        row.Children.Add(upButton);
+        row.Children.Add(downButton);
+
+        return row;
+    }
+
+    private static async Task LoadAuxiliaryRowIconAsync(ImageIcon icon, string resource)
+    {
+        icon.Source = await IconService.LoadEmbeddedAsync(resource);
+    }
+
+    /// <summary>超过最多显示个数的提示</summary>
+    private async Task ShowMaxReachedAsync()
+    {
+        var dialog = new ContentDialog
+        {
+            XamlRoot = Content.XamlRoot,
+            Content = LocalizationService.Tr("Settings.Auxiliary.MaxReached"),
+            CloseButtonText = LocalizationService.Tr("Dialog.Ok"),
+            DefaultButton = ContentDialogButton.Close
+        };
+        await dialog.ShowAsync();
     }
 
     private void BuildLanguageCard()
@@ -163,12 +324,8 @@ public sealed class AppearancePage : SettingsPageBase
         {
             _settings.Backdrop = comboBox.SelectedIndex == 0 ? BackdropKind.Acrylic : BackdropKind.Mica;
             SettingsService.Instance.Save();
-            // 切换后立即生效（需求）
-            BackdropService.Apply(App.Instance.GetMainWindow(), _settings.Backdrop);
-            if (SettingsWindow.CurrentInstance != null)
-            {
-                BackdropService.Apply(SettingsWindow.CurrentInstance, _settings.Backdrop);
-            }
+            // 切换后立即生效（需求）：统一应用到所有已创建的窗口（主/设置/待办，新窗口都要接入）
+            App.Instance.ApplyBackdropEverywhere();
         };
         MakeCard(FluentGlyphs.BackToWindow, "Settings.Backdrop", "Settings.Backdrop.Sub", comboBox);
     }
@@ -458,6 +615,13 @@ public sealed class DataPage : SettingsPageBase
                 App.Instance.ReloadMainWindowData();
             }
 
+            // 待办数据：从磁盘重新加载本地数据并刷新待办窗口（todo.json 被删后避免内存缓存写回）
+            if (selected.Contains("todo"))
+            {
+                TodoService.Instance.LoadLocal();
+                App.Instance.RefreshTodoWindowView();
+            }
+
             await ShowInfo(loc.T("Data.Delete.Done"));
 
             // 软件配置（设置/语言）在内存里有缓存，立即生效需要重启
@@ -595,6 +759,15 @@ public sealed class LauncherPage : SettingsPageBase
 
     private void BuildSubCategoryStyleCard()
     {
+        var content = new StackPanel { Spacing = 10 };
+
+        // 子分类风格行：Tab / 卡片
+        var styleRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12 };
+        styleRow.Children.Add(new TextBlock
+        {
+            Text = LocalizationService.Tr("Settings.SubCategoryStyle"),
+            VerticalAlignment = VerticalAlignment.Center
+        });
         var comboBox = new ComboBox
         {
             MinWidth = 160,
@@ -605,12 +778,47 @@ public sealed class LauncherPage : SettingsPageBase
             },
             SelectedIndex = _settings.SubCategoryStyle == SubCategoryStyle.Tab ? 0 : 1
         };
+
+        // 标签样式行（第二十轮优化6，仅 Tab 风格下显示）：选择夹风格 / 选中风格（按钮式+底部高亮条，默认）
+        var visualRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12 };
+        visualRow.Children.Add(new TextBlock
+        {
+            Text = LocalizationService.Tr("Settings.TabVisual"),
+            VerticalAlignment = VerticalAlignment.Center
+        });
+        var visualCombo = new ComboBox
+        {
+            MinWidth = 160,
+            ItemsSource = new[]
+            {
+                LocalizationService.Tr("Settings.TabVisual.Classic"),
+                LocalizationService.Tr("Settings.TabVisual.Highlight")
+            },
+            SelectedIndex = (int)_settings.SubCategoryTabVisual
+        };
+        visualCombo.SelectionChanged += (_, _) =>
+        {
+            _settings.SubCategoryTabVisual = (SubCategoryTabVisualStyle)visualCombo.SelectedIndex;
+            SaveAndRefreshPanelOnly();
+        };
+        visualRow.Children.Add(visualCombo);
+        visualRow.Visibility = _settings.SubCategoryStyle == SubCategoryStyle.Tab
+            ? Visibility.Visible : Visibility.Collapsed;
+
         comboBox.SelectionChanged += (_, _) =>
         {
             _settings.SubCategoryStyle = comboBox.SelectedIndex == 0 ? SubCategoryStyle.Tab : SubCategoryStyle.Card;
+            // 切换风格时同步显示/隐藏"标签样式"行（仅 Tab 风格下有效）
+            visualRow.Visibility = _settings.SubCategoryStyle == SubCategoryStyle.Tab
+                ? Visibility.Visible : Visibility.Collapsed;
             SaveAndRefreshPanelOnly(); // 切换后保持当前选中的分类/子分类
         };
-        MakeCard(FluentGlyphs.Tiles, "Settings.SubCategoryStyle", "Settings.SubCategoryStyle.Sub", comboBox);
+
+        styleRow.Children.Add(comboBox);
+        content.Children.Add(styleRow);
+        content.Children.Add(visualRow);
+
+        MakeCard(FluentGlyphs.Tiles, "Settings.SubCategoryStyle", "Settings.SubCategoryStyle.Sub", content);
     }
 
     /// <summary>显示和隐藏触发方式（需求-启动器2）</summary>
@@ -1077,7 +1285,436 @@ public sealed class LauncherPage : SettingsPageBase
     }
 }
 
-/// <summary>开发中占位页（待办/随手记/剪贴板，需求）</summary>
+/// <summary>待办设置页：云同步开关（webnote 便签）+ 使用教程。
+/// 不启用云同步时数据仅存本地 data\todo 目录（需求）。</summary>
+public sealed class TodoPage : SettingsPageBase
+{
+    private readonly AppSettings _settings = SettingsService.Instance.Settings;
+
+    // 云同步凭据输入框（启用下拉框选择"启用"后显示）
+    private readonly TextBox _noteNameBox = new() { MinWidth = 220 };
+    private readonly PasswordBox _notePwdBox = new() { MinWidth = 220 };
+    private readonly Button _saveButton = new() { MinWidth = 100 };
+
+    /// <summary>教程卡片（只在云同步下拉选"启用"时显示）</summary>
+    private Border? _tutorialCard;
+
+    /// <summary>重要底色色块按钮（标记 -> 按钮），用于更新选中态</summary>
+    private readonly List<(string Marker, Button Button)> _importantColorButtons = new();
+
+    public TodoPage()
+    {
+        BuildSyncCard();
+        // 教程卡片紧跟在云同步卡片下方（需求）
+        BuildTutorialCard();
+        BuildImportantColorCard();
+        BuildTriggerCard();
+        BuildAlwaysOnTopCard();
+        BuildLockSizeCard();
+        BuildShowPositionCard();
+    }
+
+    /// <summary>待办"显示和隐藏"卡片：使用快捷键（默认 Alt+2），参考启动器的快捷键记录框</summary>
+    private void BuildTriggerCard()
+    {
+        var hotkeyRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        var hotkeyCheck = new CheckBox
+        {
+            Content = LocalizationService.Tr("Settings.Trigger.Hotkey"),
+            IsChecked = _settings.TodoTriggerHotkey
+        };
+        var hotkeyBox = new TextBox
+        {
+            IsReadOnly = true,
+            Text = _settings.TodoHotkeyText,
+            MinWidth = 120,
+            PlaceholderText = LocalizationService.Tr("Settings.Trigger.HotkeyHint")
+        };
+
+        void ApplyHotkey()
+        {
+            SettingsService.Instance.Save();
+            App.Instance.RegisterHotkey();
+        }
+        hotkeyCheck.Checked += (_, _) => { _settings.TodoTriggerHotkey = true; ApplyHotkey(); };
+        hotkeyCheck.Unchecked += (_, _) => { _settings.TodoTriggerHotkey = false; ApplyHotkey(); };
+
+        // 点击框内后按下键盘组合键自动记录（与启动器快捷键一致的交互）
+        hotkeyBox.GotFocus += (_, _) => hotkeyBox.Text = LocalizationService.Tr("Settings.Trigger.HotkeyRecording");
+        hotkeyBox.KeyDown += (_, e) =>
+        {
+            e.Handled = true;
+            var key = (int)e.Key;
+            // 忽略纯修饰键
+            if (key is (int)Windows.System.VirtualKey.Control or (int)Windows.System.VirtualKey.LeftControl
+                or (int)Windows.System.VirtualKey.RightControl or (int)Windows.System.VirtualKey.Menu
+                or (int)Windows.System.VirtualKey.LeftMenu or (int)Windows.System.VirtualKey.RightMenu
+                or (int)Windows.System.VirtualKey.Shift or (int)Windows.System.VirtualKey.LeftShift
+                or (int)Windows.System.VirtualKey.RightShift or (int)Windows.System.VirtualKey.LeftWindows
+                or (int)Windows.System.VirtualKey.RightWindows)
+            {
+                return;
+            }
+
+            var modifiers = 0;
+            var modifiersState = Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(Windows.System.VirtualKey.Control);
+            if ((modifiersState & Windows.UI.Core.CoreVirtualKeyStates.Down) != 0) modifiers |= Win32Helper.MOD_CONTROL;
+            modifiersState = Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(Windows.System.VirtualKey.Menu);
+            if ((modifiersState & Windows.UI.Core.CoreVirtualKeyStates.Down) != 0) modifiers |= Win32Helper.MOD_ALT;
+            modifiersState = Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(Windows.System.VirtualKey.Shift);
+            if ((modifiersState & Windows.UI.Core.CoreVirtualKeyStates.Down) != 0) modifiers |= Win32Helper.MOD_SHIFT;
+            modifiersState = Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(Windows.System.VirtualKey.LeftWindows);
+            if ((modifiersState & Windows.UI.Core.CoreVirtualKeyStates.Down) != 0) modifiers |= Win32Helper.MOD_WIN;
+
+            _settings.TodoHotkeyModifiers = modifiers == 0 ? Win32Helper.MOD_ALT : modifiers;
+            _settings.TodoHotkeyVirtualKey = key;
+            _settings.TodoHotkeyText = BuildHotkeyText(modifiers, key);
+            hotkeyBox.Text = _settings.TodoHotkeyText;
+            ApplyHotkey();
+        };
+        hotkeyRow.Children.Add(hotkeyCheck);
+        hotkeyRow.Children.Add(hotkeyBox);
+
+        MakeCard(FluentGlyphs.Keyboard, "Settings.TodoTrigger", "Settings.TodoTrigger.Sub", hotkeyRow);
+    }
+
+    /// <summary>构造快捷键显示文本（如 Alt+2，与 LauncherPage 同款）</summary>
+    private static string BuildHotkeyText(int modifiers, int vk)
+    {
+        var parts = new List<string>();
+        if ((modifiers & Win32Helper.MOD_CONTROL) != 0) parts.Add("Ctrl");
+        if ((modifiers & Win32Helper.MOD_ALT) != 0) parts.Add("Alt");
+        if ((modifiers & Win32Helper.MOD_SHIFT) != 0) parts.Add("Shift");
+        if ((modifiers & Win32Helper.MOD_WIN) != 0) parts.Add("Win");
+        parts.Add(((Windows.System.VirtualKey)vk).ToString());
+        return string.Join("+", parts);
+    }
+
+    /// <summary>待办"永远置顶"卡片</summary>
+    private void BuildAlwaysOnTopCard()
+    {
+        var check = new CheckBox { Content = LocalizationService.Tr("Common.Enable"), IsChecked = _settings.TodoAlwaysOnTop };
+        check.Checked += (_, _) => { _settings.TodoAlwaysOnTop = true; SaveAndApplyBehavior(); };
+        check.Unchecked += (_, _) => { _settings.TodoAlwaysOnTop = false; SaveAndApplyBehavior(); };
+        MakeCard(FluentGlyphs.Pin, "Settings.TodoAlwaysOnTop", "Settings.TodoAlwaysOnTop.Sub", check);
+    }
+
+    /// <summary>待办"锁定尺寸"卡片</summary>
+    private void BuildLockSizeCard()
+    {
+        var check = new CheckBox { Content = LocalizationService.Tr("Common.Enable"), IsChecked = _settings.TodoLockSize };
+        check.Checked += (_, _) => { _settings.TodoLockSize = true; SaveAndApplyBehavior(); };
+        check.Unchecked += (_, _) => { _settings.TodoLockSize = false; SaveAndApplyBehavior(); };
+        MakeCard(FluentGlyphs.Lock, "Settings.TodoLockSize", "Settings.TodoLockSize.Sub", check);
+    }
+
+    /// <summary>待办"重要任务底色"卡片：色块单选，选"无"则重要任务不加底色（需求）</summary>
+    private void BuildImportantColorCard()
+    {
+        var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
+
+        void AddOption(string marker)
+        {
+            var button = new Button
+            {
+                Width = 34,
+                Height = 30,
+                Padding = new Thickness(0),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(6),
+                Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent)
+            };
+            if (marker == TodoColors.None)
+            {
+                button.Content = new TextBlock
+                {
+                    Text = LocalizationService.Tr("Todo.Color.None"),
+                    FontSize = 11
+                };
+            }
+            else
+            {
+                button.Content = new Border
+                {
+                    Width = 16,
+                    Height = 8,
+                    CornerRadius = new CornerRadius(4),
+                    Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent)
+                };
+                // 色块用低不透明度画刷展示实际底色效果（与列表中的呈现一致）
+                var hex = TodoColors.GetHex(marker);
+                ((Border)button.Content).Background = new SolidColorBrush(Windows.UI.Color.FromArgb(
+                    90,
+                    Convert.ToByte(hex[1..3], 16),
+                    Convert.ToByte(hex[3..5], 16),
+                    Convert.ToByte(hex[5..7], 16)));
+            }
+            button.Tag = marker;
+            button.Click += (_, _) =>
+            {
+                _settings.TodoImportantColor = marker;
+                SettingsService.Instance.Save();
+                UpdateImportantColorVisual();
+                // 让已打开的待办窗口立即换底色
+                App.Instance.RefreshTodoWindowView();
+            };
+            _importantColorButtons.Add((marker, button));
+            row.Children.Add(button);
+        }
+
+        void UpdateImportantColorVisual()
+        {
+            foreach (var (marker, button) in _importantColorButtons)
+            {
+                button.BorderBrush = marker == _settings.TodoImportantColor
+                    ? Application.Current.Resources["ControlStrongStrokeColorDefaultBrush"] as Brush
+                    : Application.Current.Resources["SubtleFillColorTransparentBrush"] as Brush;
+            }
+        }
+
+        AddOption(TodoColors.None);
+        foreach (var marker in TodoColors.All)
+        {
+            AddOption(marker);
+        }
+        UpdateImportantColorVisual();
+
+        MakeCard(FluentGlyphs.Color, "Settings.TodoImportantColor", "Settings.TodoImportantColor.Sub", row);
+    }
+
+    /// <summary>待办"显示位置"卡片（选项复用启动器的显示位置文案）</summary>
+    private void BuildShowPositionCard()
+    {
+        var comboBox = new ComboBox
+        {
+            MinWidth = 200,
+            ItemsSource = new[]
+            {
+                LocalizationService.Tr("Settings.ShowPosition.FollowMouse"),
+                LocalizationService.Tr("Settings.ShowPosition.Center"),
+                LocalizationService.Tr("Settings.ShowPosition.TopLeft"),
+                LocalizationService.Tr("Settings.ShowPosition.TopRight"),
+                LocalizationService.Tr("Settings.ShowPosition.BottomLeft"),
+                LocalizationService.Tr("Settings.ShowPosition.BottomRight"),
+                LocalizationService.Tr("Settings.ShowPosition.LastPosition")
+            },
+            SelectedIndex = (int)_settings.TodoShowPosition
+        };
+        comboBox.SelectionChanged += (_, _) =>
+        {
+            _settings.TodoShowPosition = (ShowPosition)comboBox.SelectedIndex;
+            SettingsService.Instance.Save(); // 显示时按此定位
+        };
+        MakeCard(FluentGlyphs.Home, "Settings.TodoShowPosition", "Settings.TodoShowPosition.Sub", comboBox);
+    }
+
+    /// <summary>保存并应用待办窗口行为（置顶/锁定尺寸立即生效）</summary>
+    private void SaveAndApplyBehavior()
+    {
+        SettingsService.Instance.Save();
+        App.Instance.ApplyTodoWindowBehavior();
+    }
+
+    /// <summary>云同步卡片：下拉框（不启用/启用）+ 便签名称/密码输入框 + 保存按钮。
+    /// 只有名称和密码都填写后才能点保存（需求）；保存前弹窗警示，确认后调接口验证。</summary>
+    private void BuildSyncCard()
+    {
+        var loc = LocalizationService.Instance;
+
+        // 下拉框：不启用（默认）/ 启用
+        var comboBox = new ComboBox
+        {
+            MinWidth = 160,
+            ItemsSource = new[]
+            {
+                LocalizationService.Tr("Settings.TodoSync.Disable"),
+                LocalizationService.Tr("Settings.TodoSync.Enable")
+            },
+            SelectedIndex = _settings.TodoCloudSyncEnabled ? 1 : 0
+        };
+
+        // 名称/密码输入框 + 保存按钮（默认收起，选择"启用"后显示）
+        var nameRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        nameRow.Children.Add(new TextBlock
+        {
+            Text = loc.T("Settings.TodoSync.NoteName"),
+            VerticalAlignment = VerticalAlignment.Center,
+            MinWidth = 70,
+            Tag = "Settings.TodoSync.NoteName"
+        });
+        _noteNameBox.PlaceholderText = loc.T("Settings.TodoSync.NoteName");
+        _noteNameBox.Text = _settings.TodoNoteName;
+        nameRow.Children.Add(_noteNameBox);
+
+        var pwdRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Margin = new Thickness(0, 6, 0, 0) };
+        pwdRow.Children.Add(new TextBlock
+        {
+            Text = loc.T("Settings.TodoSync.NotePwd"),
+            VerticalAlignment = VerticalAlignment.Center,
+            MinWidth = 70,
+            Tag = "Settings.TodoSync.NotePwd"
+        });
+        _notePwdBox.PlaceholderText = loc.T("Settings.TodoSync.NotePwd");
+        _notePwdBox.Password = _settings.TodoNotePwd;
+        pwdRow.Children.Add(_notePwdBox);
+
+        // 小眼睛按钮：点击切换明文/密文（PasswordRevealMode）
+        var eyeButton = new Button
+        {
+            Width = 34,
+            Height = 34,
+            Padding = new Thickness(0),
+            BorderThickness = new Thickness(0),
+            CornerRadius = new CornerRadius(6),
+            Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
+            Content = new FontIcon
+            {
+                Glyph = "\uE7B3", // RedEye
+                FontSize = 14,
+                FontFamily = new FontFamily(FluentGlyphs.FontFamilyName)
+            }
+        };
+        ToolTipService.SetToolTip(eyeButton, loc.T("Settings.TodoSync.ShowPwd"));
+        eyeButton.Click += (_, _) =>
+        {
+            var showing = _notePwdBox.PasswordRevealMode == PasswordRevealMode.Visible;
+            _notePwdBox.PasswordRevealMode = showing ? PasswordRevealMode.Hidden : PasswordRevealMode.Visible;
+            // 图标跟着切换：显示中用"隐藏"眼睛，密文中用"查看"眼睛
+            ((FontIcon)eyeButton.Content).Glyph = showing ? "\uE7B3" : "\uED1A";
+        };
+        pwdRow.Children.Add(eyeButton);
+
+        _saveButton.Content = loc.T("Dialog.Save");
+        _saveButton.IsEnabled = IsSaveInputValid();
+        var saveRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 10, 0, 0) };
+        saveRow.Children.Add(_saveButton);
+
+        var fields = new StackPanel { Margin = new Thickness(0, 10, 0, 0) };
+        fields.Children.Add(nameRow);
+        fields.Children.Add(pwdRow);
+        fields.Children.Add(saveRow);
+        fields.Visibility = _settings.TodoCloudSyncEnabled ? Visibility.Visible : Visibility.Collapsed;
+
+        // 两者都填写才能点保存（需求）
+        _noteNameBox.TextChanged += (_, _) => _saveButton.IsEnabled = IsSaveInputValid();
+        _notePwdBox.PasswordChanged += (_, _) => _saveButton.IsEnabled = IsSaveInputValid();
+        _saveButton.Click += async (_, _) => await SaveSyncConfigAsync();
+
+        comboBox.SelectionChanged += (_, _) =>
+        {
+            var enable = comboBox.SelectedIndex == 1;
+            if (!enable)
+            {
+                // 直接关闭云同步：立即生效（数据继续留在本地，下次打开窗口读本地）
+                _settings.TodoCloudSyncEnabled = false;
+                SettingsService.Instance.Save();
+            }
+            fields.Visibility = enable ? Visibility.Visible : Visibility.Collapsed;
+            // 教程卡片只针对云同步：下拉选"启用"才显示（需求）
+            if (_tutorialCard != null)
+            {
+                _tutorialCard.Visibility = enable ? Visibility.Visible : Visibility.Collapsed;
+            }
+            // 让已打开的待办窗口立即响应（隐藏/显示同步按钮、停止报错条）
+            App.Instance.OnTodoSyncSettingsChanged();
+        };
+
+        var content = new StackPanel();
+        content.Children.Add(comboBox);
+        content.Children.Add(fields);
+        MakeCard(FluentGlyphs.Sync, "Settings.TodoSync", "Settings.TodoSync.Sub", content);
+    }
+
+    /// <summary>名称和密码都非空才能保存（需求）</summary>
+    private bool IsSaveInputValid() =>
+        !string.IsNullOrWhiteSpace(_noteNameBox.Text) && !string.IsNullOrWhiteSpace(_notePwdBox.Password);
+
+    /// <summary>保存云同步配置：先弹警示框，确认后调【获取】接口验证名称/密码，成功才落盘（需求）</summary>
+    private async Task SaveSyncConfigAsync()
+    {
+        var loc = LocalizationService.Instance;
+
+        // 警示弹窗（需求原文）
+        var warning = new ContentDialog
+        {
+            XamlRoot = Content.XamlRoot,
+            Title = loc.T("Settings.TodoSync.WarningTitle"),
+            Content = loc.T("Settings.TodoSync.Warning"),
+            PrimaryButtonText = loc.T("Dialog.Ok"),
+            CloseButtonText = loc.T("Dialog.Cancel"),
+            DefaultButton = ContentDialogButton.Primary
+        };
+        if (await warning.ShowAsync() != ContentDialogResult.Primary) return;
+
+        // 调【获取】接口验证：成功才允许保存（需求）
+        _saveButton.IsEnabled = false;
+        var fetch = await WebNoteClient.FetchInfoAsync(_noteNameBox.Text.Trim(), _notePwdBox.Password);
+        _saveButton.IsEnabled = true;
+
+        if (!fetch.Success)
+        {
+            // 提示便签名称不存在或便签密码错误（需求）
+            var message = loc.T(fetch.ErrorKey ?? "WebNote.NetworkError");
+            if (!string.IsNullOrEmpty(fetch.RawError)) message += "\n" + fetch.RawError;
+            await ShowInfo(message);
+            return;
+        }
+
+        // 验证通过：保存配置（note_id/note_token 不落盘，由 TodoService 在内存缓存）
+        _settings.TodoNoteName = _noteNameBox.Text.Trim();
+        _settings.TodoNotePwd = _notePwdBox.Password;
+        _settings.TodoCloudSyncEnabled = true;
+        SettingsService.Instance.Save();
+        // 让已打开的待办窗口立即显示"云同步"按钮并自动刷新一次（需求）
+        App.Instance.OnTodoSyncSettingsChanged();
+        await ShowInfo(loc.T("Settings.TodoSync.Success"));
+    }
+
+    /// <summary>使用教程卡片：两步说明 + "打开webnote"按钮（打开 https://webnote.cc/，需求）。
+    /// 教程只针对云同步，所以下拉选"启用云同步"时才显示。</summary>
+    private void BuildTutorialCard()
+    {
+        var content = new StackPanel { Spacing = 4 };
+        content.Children.Add(new TextBlock
+        {
+            Text = "1. " + LocalizationService.Tr("Settings.TodoSync.Tutorial.Step1"),
+            TextWrapping = TextWrapping.Wrap,
+            Tag = "Settings.TodoSync.Tutorial.Step1"
+        });
+        content.Children.Add(new TextBlock
+        {
+            Text = "2. " + LocalizationService.Tr("Settings.TodoSync.Tutorial.Step2"),
+            TextWrapping = TextWrapping.Wrap,
+            Tag = "Settings.TodoSync.Tutorial.Step2"
+        });
+        var button = new Button
+        {
+            Content = LocalizationService.Tr("Settings.TodoSync.Tutorial"),
+            Margin = new Thickness(0, 8, 0, 0)
+        };
+        button.Click += (_, _) => SettingsActions.OpenUrl(WebNoteClient.SiteUrl);
+        content.Children.Add(button);
+
+        // 记录卡片引用：云同步下拉框切换显示/隐藏
+        _tutorialCard = MakeCard(FluentGlyphs.Globe, "Settings.TodoSync.TutorialCard", "Settings.TodoSync.TutorialCard.Sub", content);
+        _tutorialCard.Visibility = _settings.TodoCloudSyncEnabled ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    /// <summary>信息弹窗</summary>
+    private async Task ShowInfo(string message)
+    {
+        var dialog = new ContentDialog
+        {
+            XamlRoot = Content.XamlRoot,
+            Content = message,
+            CloseButtonText = LocalizationService.Tr("Dialog.Ok"),
+            DefaultButton = ContentDialogButton.Close
+        };
+        await dialog.ShowAsync();
+    }
+}
+
+/// <summary>开发中占位页（随手记/剪贴板，需求）</summary>
 public sealed class PlaceholderPage : SettingsPageBase
 {
     public PlaceholderPage(string tag)

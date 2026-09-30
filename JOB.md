@@ -212,18 +212,108 @@ build.bat / clean.bat   双击可用的编译/清理脚本
 - Windows 11 的 IContextMenu 经典菜单实现破坏了教科书契约：命令表在菜单弹出过程中被重排（本机实测菜单 ID 稀疏且弹出前后布局还会变），`lpVerb = cmd - idCmdFirst` 不可用；动词字符串调用只对部分命令有效（实测仅"打开"），GCS_VALIDATE 又不被默认处理器支持。经 4 轮修复（第十五~十八轮）仍无法让全部菜单项可靠执行，且中间过程引入过进程内访问违例（0xc0000005）。**结论：在 WinUI 3 宿主里可靠弹出并执行 Windows 11 的完整 Shell 右键菜单目前没有稳定可行的纯 Win32 路径，需求放弃。** 若将来重启此需求，考虑的方向是只提供固定 canonical 动词（open/runas/properties 等自绘菜单），不再托管完整 Shell 菜单。
 
 
+## 最新变更（2026-09-30 第二十轮：待办功能 + webnote 云同步）
+- **待办窗口**（`TodoWindow.xaml/.cs`，单例、关闭=隐藏、420x640）：
+  - 标题栏右侧加"同步刷新"按钮（关闭按钮旁边，仅云同步启用时显示）；
+  - 标签栏：全部 / 今天 / 重要 / 已完成（"今天"= 未完成且今天截止或已过期，依赖截止日期字段）；
+  - 颜色选择：8 色（红橙黄绿蓝紫青粉，参考 DeskBox）过滤行，点击过滤、再点取消；过滤中的颜色同时作为新任务默认颜色；
+  - 添加任务：全宽按钮 → 点击变行内输入框，回车添加（Esc 取消）；列表行：勾选框（完成加删除线）+ 颜色条 + 文字 + 截止日期小字（过期红色"已过期"）+ 悬停操作（重要星标/删除）+ 双击/右键编辑；
+  - 编辑弹窗：内容 + 截止日期（CalendarDatePicker）+ 颜色（含"无颜色"）；
+  - 右下角"清除已完成"按钮（无已完成任务时置灰）+ 左侧总任务数统计。
+  - 按需求**不做**提醒、重复、步骤、附件、Markdown。
+- **数据模型**（`Models/TodoModels.cs`）：TodoItem（Id/Text/IsCompleted/IsImportant/Color/DueDate/CompletedAt/CreatedAt）+ TodoData（Version+Items）+ TodoColors 常量（存小写英文标记）+ TodoFilterTab 枚举。本地存 `data\todo\todo.json`（复用 JsonStore）。
+- **云同步**（`Services/WebNoteClient.cs` + `Services/TodoService.cs`）：
+  - webnote（webnote.cc）接口：**获取** info/ 用 multipart/form-data（note_name/note_pwd），**保存** save/ 用 urlencoded（note_name/note_id/note_content/note_token/expire_time=94608000/note_pwd）；鉴权靠 Referer 头 `https://webnote.cc/{名称}@{密码}` + Chrome UA；status：1 成功、2 名称不存在、3/4 密码错。
+  - 数据载体：note_content = JSON 数组**只放一个成员** `{title:"DaenLauncher-Todo", content:"DaenLauncher-Todo\n<TodoData JSON>"}`（content 第一行必须是标题，换行后才是数据）。
+  - note_token 规则（按需求）：打开窗口/点刷新 → 调【获取】缓存 note_id/note_token（仅内存）；每次写操作前再调【获取】对比 token，不一致=其他客户端改过 → 用最新 token 保存；保存成功后响应返回新 token（每个 token 只能用一次）→ 更新缓存。【获取】失败则所有写操作禁用（窗口顶部 InfoBar 报错）。
+  - 云端没有 DaenLauncher-Todo 条目时用本地数据自动创建；开启同步后云端为准，本地始终留一份（离线可见）。
+- **设置-待办页**（`Views/SettingsPages.cs` 新增 TodoPage，替换占位页）：
+  - 云同步下拉框（不启用=默认 / 启用）；启用后显示便签名称、便签密码（PasswordBox）输入框 + 保存按钮，两者都填才能点；保存前弹警示框（需求原文"清除已有内容并仅保存同步内容"），确认后调【获取】验证，成功才写入配置（TodoCloudSyncEnabled/TodoNoteName/TodoNotePwd），失败提示名称不存在/密码错误；
+  - 使用教程卡片：两步说明 + "查看教程"按钮打开 https://webnote.cc/ 。
+- **接线**：App 新增 `ShowTodoWindow()`（单例）并纳入主题切换/退出清理；主窗口底部"待办"按钮从占位改为打开待办窗口；启动时 `TodoService.LoadLocal()`；SettingsWindow 导航 "Todo" => TodoPage。
+- **语言**：zh-CN/en-US 各 +40 键（Settings.TodoSync.* / WebNote.* / Todo.*，257 键两边对齐 0 缺失）。
+- **测试**：Debug 编译 0 错误 0 警告；build.bat Release 单文件产物正常。云同步接口/窗口交互待用户实测。
+
+## 最新变更（2026-09-30 第二十一轮：待办 BUG 修复 + 6 项优化 + 启动器"选中风格"标签）
+- **BUG1 云同步保存成功但仍提示写操作禁用、标题栏看不到同步刷新按钮**：待办窗口是单例，"同步按钮可见性 + 首次云端拉取"原来只在构造函数里做一次——在设置页启用云同步之前窗口已创建的话，按钮永远隐藏、也永远不同步。修复：全部挪到 `ActivateAndBringToFront()`（每次显示都执行）：重算 SyncButton 可见性 + 云同步开启时重新调用【获取】接口。**教训：单例窗口的"按设置变化"的 UI 状态和同步动作必须放在每次显示路径上，不能只放在构造函数。**
+- **优化1 待办备注**：TodoItem 新增 `Notes`；编辑/新增弹窗都有备注输入框（默认 5 行高，Height=118，超长出滚动条）；列表行在截止日期下方显示一行备注预览（超长省略）。
+- **优化2 新增待办弹窗**：底部"清除已完成"右边加"添加任务"按钮，点击弹出新增弹窗（内容/备注/截止日期/颜色一次填全，默认颜色=当前颜色过滤色）；原行内快捷添加保留，按钮文字改为"快捷添加任务"。新增/编辑弹窗共用 `BuildTodoEditor`（返回元组，避免 lambda 捕获 out 参数的 CS1628）。
+- **优化3 快捷截止日期**：截止日期下方一排快捷按钮——今天 / 明天 / 本周六（周一为起点算本周六，当天是周六即今天）/ 下周一 / 清除（CalendarDatePicker 自身无法取消已选日期）。
+- **优化4** 设置页"查看教程"按钮文字改为"打开webnote"。
+- **优化5 待办窗口设置**：设置-待办页新增 4 张卡片——显示和隐藏（快捷键，默认 Alt+2，记录交互与启动器一致）、永远置顶（默认开）、锁定尺寸（默认关）、显示位置（默认桌面中央，"上次位置"按中央处理）。热键走 Win32 热键 id=2（`Win32Helper.HotkeyIdTodo` + `TodoHotkeyPressed` 事件，`HandleHotkeyMessage` 改为带 wParam 按 id 分发）；App 新增 `ToggleTodoWindow` / `ApplyTodoWindowBehavior`；待办窗口显示时按 TodoShowPosition 定位（ComputeShowPosition 复刻主窗口逻辑，逻辑像素 420x640 × DPI）。
+- **优化6 启动器子分类 Tab"选中风格"**：`SubCategoryTabVisualStyle` 枚举（Classic 选择夹=原 TabView / Highlight 选中风格=新增，**默认选中风格**）；`BuildHighlightTabPanel` 自绘：一行 N 列按钮式标签（选中浅背景+加粗）+ 选中列底部 3px 高亮条（AccentFillColorDefaultBrush，默认即蓝色）+ 内容区只放当前子分类（点击切换）；标签按钮注册进 `_panelTargets` 保持跨子分类拖动；设置-启动器-子分类风格卡片新增"标签样式"下拉框（仅 Tab 风格时显示）。注意 `SetHeaderFontWeight` 用 VisualTreeHelper 递归改头部文字粗细。
+- **语言**：zh-CN/en-US 各 +22 键（Settings.TodoTrigger/.TodoAlwaysOnTop/.TodoLockSize/.TodoShowPosition/.TabVisual.*、Todo.QuickAdd/.AddTask/.AddDialogTitle/.Content/.Notes/.Due.Quick.*/.DueDate.Clear，并改 Tutorial 文案，279 键对齐 0 缺失）。
+- **编译注意**：C# 对象初始化器里不能写附加属性（`ScrollViewer.VerticalScrollBarVisibility`），要构造后 `SetValue`；lambda 里不能捕获 out 参数（CS1628），用返回元组解决。
+- **测试**：Debug 0 错误 0 警告；build.bat Release 产物正常。待用户实测。
+
+## 最新变更（2026-09-30 第二十二轮：待办 UI 5 项优化）
+- **同步刷新按钮移到底部**：从标题栏移到左下角"清除已完成"左边（云同步未启用仍隐藏）；同步失败提示文案同步去掉"标题栏"字样。
+- **"添加任务"按钮改蓝色**：AccentButtonStyle（系统强调色）。
+- **重要任务淡色底**：TodoItem 重要时列表行加底色——8 色清淡色板（alpha=34 的浅红/橙/黄/绿/蓝/紫/青/粉），按 Id 手写稳定哈希取色（string.GetHashCode 每次进程运行会变，手写保证同一条任务颜色固定），深浅色主题下都不影响文字。
+- **教程卡片条件显示**：设置-待办"使用教程"卡片只在云同步下拉选"启用"时显示（卡片引用存 `_tutorialCard`，下拉切换 Visible/Collapsed），且位于云同步卡片下方。
+- **便签密码小眼睛**：密码框旁加眼睛按钮，点击切换 PasswordRevealMode（Visible ↔ Hidden）；图标 E7B3（RedEye）↔ ED1A（Hide）。
+- **编译坑**：WinUI 投影里没有 `Windows.UI.Colors`（要用 `Microsoft.UI.Colors`）；`PasswordRevealMode` 的成员是 Peek/Hidden/Visible（没有 Password）。
+- **测试**：Debug 0 错误 0 警告；build.bat Release 产物正常。待用户实测。
+
+## 最新变更（2026-09-30 第二十三轮：待办联动与细节修复 5 项）
+- **教程卡片位置**：设置-待办页构建顺序调整为 云同步 → 教程 → 热键/置顶/锁定/位置，教程卡片显示在"云同步"卡片正下方（仍只在选"启用"时显示）。
+- **云同步保存立即生效**：TodoPage 保存成功或下拉关闭云同步后调 `App.OnTodoSyncSettingsChanged()` → 待办窗口 `OnSyncSettingsChanged()`：立即显示/隐藏"云同步"按钮 + 启用时自动刷新一次，不再需要关开窗口。窗口显示路径（ActivateAndBringToFront）也统一走该方法。
+- **"云同步"按钮反馈**：按钮文字"同步刷新"→"云同步"；点击同步成功后文字短暂变"成功"，1 秒后自动变回（ReloadFromCloudAsync 改为返回 bool，文字反馈只在按钮点击路径）。
+- **新窗口联动规则（重要，长期约束）**：之后所有新窗口都必须接入——① 软件标题：`RefreshTitle()` + App.RefreshAllTitles 里调用；② 窗口材质：App.ApplyBackdropEverywhere() 统一应用（外观页改用它，不再逐窗口点名）；③ 主题：App.ApplyThemeEverywhere()。本轮已把待办窗口接入 RefreshAllTitles 和 ApplyBackdropEverywhere。
+- **深色模式列表底色**：任务行背景从 CardBackgroundFillColorDefaultBrush（深色下灰重）改为 SubtleFillColorSecondaryBrush（半透明叠加，和窗口底色融合），边框不变。
+- **测试**：Debug 0 错误 0 警告；build.bat Release 产物正常。待用户实测。
+
+## 最新变更（2026-09-30 第二十四轮：云/本地数据彻底分离 + 重要底色自定义）
+- **云/本地两套完全独立的数据（重要架构调整）**：TodoService 拆成 `_localData`（todo.json）和 `_cloudData`（仅内存），`Data` 属性按模式返回对应那套——
+  - 本地模式：读写 todo.json，改动立即落盘；
+  - 云同步模式：数据只来自云端、只推云端，**不写任何本地文件**；
+  - 切换模式：窗口 `OnSyncSettingsChanged` 里切回本地时 `LoadLocal()`（先清 JsonStore 缓存再读盘）+ 刷新列表，云端数据留在内存随时可切回；LoadLocal 改为先 `_store.Reload()` 保证拿到磁盘最新内容；
+  - 云端没有 DaenLauncher-Todo 条目时改为推**空的 TodoData**（原来推本地数据——两套数据分离后不再混合）；
+  - 数据-删除勾选 todo 后也调 `LoadLocal()` + 刷新窗口，防止内存缓存把删除的文件写回去。
+- **重要任务底色改为用户设置**：AppSettings 新增 `TodoImportantColor`（TodoColors 标记，默认 yellow）；设置-待办新增"重要任务底色"卡片（8 色 + "无"，单选带描边，色块按 alpha=90 预览实际效果）；待办窗口列表按设置取色（alpha=34 叠加），不再随机取色（删除 ImportantTints 色板和 StableHash）。
+- **联动**：改重要底色后 `App.RefreshTodoWindowView()` → 待办窗口 `RefreshView()` 立即生效。
+- **测试**：Debug 0 错误 0 警告；build.bat Release 产物正常。待用户实测。
+
+## 最新变更（2026-09-30 第二十五轮：待办"上次位置"修复）
+- **待办显示位置"上次位置"无效**：当初实现偷懒只做了"LastPosition 落到 default 分支=桌面中央"，且从未记录过待办窗口位置。修复（与主窗口同款方案）：AppSettings 新增 `TodoLastWindowX/Y`（物理像素，-1=未记录）；TodoWindow 订阅 `AppWindow.Changed`（DidPositionChange）防抖 500ms 保存；Closing（隐藏/退出）前 `SavePositionNow()` 立即落盘；ComputeShowPosition 增加 LastPosition 分支（用记录坐标，越界钳制回工作区，没记录过退回桌面中央）。**坑：Changed 订阅前必须先创建防抖计时器，否则事件先到会 NullReference。**
+- **测试**：Debug 0 错误 0 警告；build.bat Release 产物正常。待用户实测（拖动待办窗口→关闭→重开应在上次位置显示）。
+
+## 最新变更（2026-09-30 第二十六轮：附属功能栏可配置——勾选 + 排序 + "更多"菜单）
+- **需求**：附属功能（待办/随手记/剪贴板，以后还会加）不能都平铺在启动器左下角。设计经用户确认：底栏最多显示 3 个勾选的功能 + 一个"⋯"按钮，点击弹出系统风格菜单（图标+名称，仅列出**未勾选**的功能）。
+- **注册表**（`Models/AuxiliaryFeatures.cs`）：`AuxiliaryFeature(Id, NameKey, IconResource)` + `All[]`（以后新增附属功能在此加一行）+ `MaxVisible=3` + `TodoId` 常量。
+- **设置**（AppSettings）：`AuxiliaryVisible`（有序 id 列表，默认 todo/note/clipboard 全显）。
+- **MainWindow**：XAML 三个硬编码按钮换成空 `AuxBarPanel`，代码 `RebuildAuxiliaryBar()` 按设置构建——可见按钮 52x44（图标）+ 未勾选时追加"⋯"按钮（\uE712）；"⋯"每次点击重建 MenuFlyout（语言切换后文字最新），`ShowAt(anchor, Placement=Top)` 从按钮上方弹出；`OpenAuxiliaryFeature(id)` 分发（todo→待办窗口，其余→开发中弹窗）。语言切换时也重建底栏。删除原 LoadPlaceholderIconsAsync 和 PlaceholderButton_Click。
+- **设置-常规新增"附属功能"卡片**：每行 = 显示勾选框 + 图标名称 + 上移/下移（\uE70E/\uE70D）；已勾选的行才可移动（在显示列表内交换）；勾选超 3 个拒绝并弹提示；卡片底部有"最多显示 3 个"说明；变化后 `App.RefreshAuxiliaryBar()` 立即生效。GeneralPage 里 `BuildAuxiliaryRow` 返回 Grid。
+- **语言**：zh/en 各 +6 键（Settings.Auxiliary/.Show/.MaxHint/.MaxReached、Main.MoreFeatures，290 键对齐）。
+- **测试**：Debug 0 错误 0 警告；build.bat Release 产物正常。待用户实测。
+
+## 关键决策（待办云同步）与已知限制
+- **便签密码明文存 settings.json**（本机文件，与桌面便签场景风险可接受；如需加密另做）。
+- **推送失败的处理**：写操作先改内存再推云端（云端模式不落本地）；若推送失败，云端数据未更新，**下次窗口打开会重新从云端拉取**，未推送的修改会丢（云为唯一事实源的模型，需求如此设计）。
+- **云/本地是两套独立数据**（第二十四轮）：云同步模式不写本地文件，本地模式不碰云端，随时切换互不影响。
+- **token 冲突不合并内容**：需求只要求"发现不一致就用最新 token 保存"（以本机数据覆盖），未做内容级合并。
+- CalendarDatePicker.FirstDayOfWeek 的类型是 `Windows.Globalization.DayOfWeek`（不是 Microsoft.UI.Xaml 的）。
+
 ## 当前进度
 - ✅ 需求1.md 主体 + 十八轮改进/修复全部完成；**"资源管理器菜单"需求已在第十九轮彻底移除（用户决定放弃）**。
-- ⚠️ 待用户实测：第十二轮（覆盖 70% 触发重排 + 滑动动画）、第十三轮（任务栏图标缓存修复）、第十四轮（打开配置目录按钮）、第十九轮（确认右键菜单已无"资源管理器菜单"项且其余功能正常）。
+- ✅ 第二十轮：待办功能完成（窗口 + 本地存储 + webnote 云同步 + 设置页）。
+- ✅ 第二十一轮：云同步 BUG 修复 + 待办备注/新增弹窗/快捷日期/窗口设置 + 启动器"选中风格"标签。
+- ✅ 第二十二轮：待办 UI 5 项优化（同步按钮移底部、蓝色添加按钮、重要淡色底、教程卡片条件显示、密码小眼睛）。
+- ✅ 第二十三轮：教程卡片位置、云同步保存即时生效、"云同步"按钮成功反馈、标题/材质联动、深色模式底色修复。
+- ✅ 第二十四轮：云/本地数据彻底分离（随时切换互不影响）+ 重要底色改为设置里自选。
+- ✅ 第二十五轮：待办"上次位置"修复（位置记录 + 恢复）。
+- ✅ 第二十六轮：附属功能栏可配置（勾选最多3个 + 排序 + "⋯"更多菜单）。
+- ⚠️ 待用户实测：第十二轮（覆盖 70% 触发重排 + 滑动动画）、**第二十~二十六轮（待办窗口全部交互、云同步、待办快捷键 Alt+2、启动器选中风格标签、附属功能栏配置）**。
 - 📌 回滚点：commit 991b8b1（第十一轮拖拽可用版本）。第十二轮起改动尚未提交，确认手感后再提交新检查点。
 
 ## 待办事项
 - 用户实测后修 bug。
-- 待办/随手记/剪贴板功能（下轮需求）。
+- 随手记/剪贴板功能（下轮需求）。
 - "左键双击桌面"、"双击任务栏"触发（预留复选框，需窗口层级判断）。
 - 关于页"应用更新"检查/自动更新。
 
 ## 关键决策
+- **新窗口必须接入三项联动（第二十三轮起长期约束）**：① `RefreshTitle()` 并加入 `App.RefreshAllTitles()`（自定义软件标题）；② 窗口材质通过 `App.ApplyBackdropEverywhere()` 统一应用；③ 主题通过 `App.ApplyThemeEverywhere()`。已接入：主窗口、设置窗口、待办窗口。
 - **不内置 WrapPanel**：2.3.9 的 WinUI 没有 → 自己写了 `Controls/WrapPanel.cs`。
 - **托盘菜单手动弹出**：`MenuActivation=None` + `RightClickCommand` 里 `ShowContextMenu(光标位置)`，避免位置不准。
 - **热键注册在主窗口 HWND**：主窗口懒创建前热键不可用，可接受（静默启动时托盘/钩子可用）。

@@ -77,26 +77,11 @@
                     </ListView.ItemTemplate>
                 </ListView>
 
-                <!-- 底部 3 个功能入口（占位，需求-布局3） -->
+                <!-- 底部附属功能栏（由代码按设置动态构建：最多3个 + "更多"菜单） -->
                 <Border Grid.Row="1" BorderThickness="0,1,0,0" BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
                         Padding="0,8,0,0" Margin="0,8,0,0">
-                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Spacing="6">
-                        <Button x:Name="TodoButton" Width="52" Height="44" Padding="4"
-                                Background="Transparent" BorderThickness="0"
-                                Click="PlaceholderButton_Click" Tag="todo">
-                            <Image x:Name="TodoIcon" Height="26" />
-                        </Button>
-                        <Button x:Name="NoteButton" Width="52" Height="44" Padding="4"
-                                Background="Transparent" BorderThickness="0"
-                                Click="PlaceholderButton_Click" Tag="note">
-                            <Image x:Name="NoteIcon" Height="26" />
-                        </Button>
-                        <Button x:Name="ClipboardButton" Width="52" Height="44" Padding="4"
-                                Background="Transparent" BorderThickness="0"
-                                Click="PlaceholderButton_Click" Tag="clipboard">
-                            <Image x:Name="ClipboardIcon" Height="26" />
-                        </Button>
-                    </StackPanel>
+                    <StackPanel x:Name="AuxBarPanel" Orientation="Horizontal"
+                                HorizontalAlignment="Center" Spacing="6" />
                 </Border>
             </Grid>
 

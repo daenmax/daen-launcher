@@ -160,7 +160,8 @@ public sealed partial class SettingsWindow : Window
             "Appearance" => new AppearancePage(),
             "Data" => new DataPage(),
             "Launcher" => new LauncherPage(),
-            "Todo" or "Note" or "Clipboard" => new PlaceholderPage(tag),
+            "Todo" => new TodoPage(),
+            "Note" or "Clipboard" => new PlaceholderPage(tag),
             "About" => new AboutPage(),
             _ => new GeneralPage()
         };

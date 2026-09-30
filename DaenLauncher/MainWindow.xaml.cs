@@ -149,9 +149,9 @@ public sealed partial class MainWindow : Window
 
         // ===== 初始化界面 =====
         _ = LoadTitleBarIconAsync();
-        _ = LoadPlaceholderIconsAsync();
         ApplyLocalization();
         LoadCategories();
+        RebuildAuxiliaryBar();
 
         // 分隔条：悬停时显示左右调整光标，提示可拖拽（优化项）
         Splitter.PointerEntered += (_, _) => Splitter.SetSplitterCursor(true);
@@ -170,13 +170,6 @@ public sealed partial class MainWindow : Window
     {
         var bitmap = await IconService.LoadEmbeddedAsync("DaenLauncher.Assets.logo.logo_64.png");
         if (bitmap != null) TitleBarIcon.Source = bitmap;
-    }
-
-    private async Task LoadPlaceholderIconsAsync()
-    {
-        TodoIcon.Source = await IconService.LoadEmbeddedAsync("DaenLauncher.Assets.Icons.待办_64.png");
-        NoteIcon.Source = await IconService.LoadEmbeddedAsync("DaenLauncher.Assets.Icons.随记_64.png");
-        ClipboardIcon.Source = await IconService.LoadEmbeddedAsync("DaenLauncher.Assets.Icons.剪贴板_64.png");
     }
 
     /// <summary>按设置的显示位置显示主窗口（需求-启动器6）</summary>
@@ -399,11 +392,111 @@ public sealed partial class MainWindow : Window
     }
 
     /// <summary>底部功能入口占位按钮（待办/随手记/剪贴板，需求-布局3）</summary>
-    private void PlaceholderButton_Click(object sender, RoutedEventArgs e)
+    /// <summary>打开附属功能（todo = 待办窗口；其余为开发中占位，新功能在注册表里扩展）</summary>
+    private void OpenAuxiliaryFeature(string id)
     {
+        if (id == AuxiliaryFeatures.TodoId)
+        {
+            App.Instance.ShowTodoWindow();
+            return;
+        }
         _ = ShowMessageDialog(LocalizationService.Tr("Main.UnderDevelopment"),
             LocalizationService.Tr("Dialog.Info"));
     }
+
+    #region 附属功能栏（左下角，按设置动态构建）
+
+    /// <summary>重建左下角附属功能栏（启动时和设置变化后调用）：
+    /// 显示设置里勾选的功能（最多 3 个），未勾选的通过"更多"菜单访问（需求）</summary>
+    public void RebuildAuxiliaryBar()
+    {
+        AuxBarPanel.Children.Clear();
+
+        var visibleIds = SettingsService.Instance.Settings.AuxiliaryVisible;
+        // 顺序跟随 AuxiliaryVisible 的排列（设置里可上下调整），防御性截断最多 3 个
+        var visible = visibleIds
+            .Select(id => AuxiliaryFeatures.All.FirstOrDefault(f => f.Id == id))
+            .OfType<AuxiliaryFeature>()
+            .Take(AuxiliaryFeatures.MaxVisible)
+            .ToList();
+        var hidden = AuxiliaryFeatures.All
+            .Where(f => !visibleIds.Contains(f.Id))
+            .ToList();
+
+        foreach (var feature in visible)
+        {
+            AuxBarPanel.Children.Add(BuildAuxiliaryButton(feature));
+        }
+        if (hidden.Count > 0)
+        {
+            AuxBarPanel.Children.Add(BuildMoreAuxiliaryButton(hidden));
+        }
+    }
+
+    /// <summary>构建一个附属功能按钮（52x44 图标按钮，与原占位按钮一致）</summary>
+    private Button BuildAuxiliaryButton(AuxiliaryFeature feature)
+    {
+        var button = new Button
+        {
+            Width = 52,
+            Height = 44,
+            Padding = new Thickness(4),
+            Background = new SolidColorBrush(Colors.Transparent),
+            BorderThickness = new Thickness(0)
+        };
+        var icon = new Image { Height = 26 };
+        button.Content = icon;
+        _ = LoadAuxiliaryImageAsync(icon, feature.IconResource);
+        button.Click += (_, _) => OpenAuxiliaryFeature(feature.Id);
+        return button;
+    }
+
+    /// <summary>构建"更多功能"按钮（⋯，点击弹出未勾选功能的菜单，需求）</summary>
+    private Button BuildMoreAuxiliaryButton(List<AuxiliaryFeature> hidden)
+    {
+        var button = new Button
+        {
+            Width = 34,
+            Height = 44,
+            Padding = new Thickness(0),
+            Background = new SolidColorBrush(Colors.Transparent),
+            BorderThickness = new Thickness(0)
+        };
+        button.Content = new FontIcon { Glyph = "\uE712", FontSize = 14 }; // More：省略号
+        ToolTipService.SetToolTip(button, LocalizationService.Tr("Main.MoreFeatures"));
+        button.Click += (_, _) => ShowAuxiliaryMenu(button, hidden);
+        return button;
+    }
+
+    /// <summary>弹出"更多功能"菜单（竖排：图标 + 名称，在按钮上方弹出）。
+    /// 每次点击都重建菜单，保证语言切换后文字是最新的。</summary>
+    private void ShowAuxiliaryMenu(FrameworkElement anchor, List<AuxiliaryFeature> features)
+    {
+        var menu = new MenuFlyout();
+        foreach (var feature in features)
+        {
+            var item = new MenuFlyoutItem { Text = LocalizationService.Tr(feature.NameKey) };
+            var icon = new ImageIcon { Width = 20, Height = 20 };
+            item.Icon = icon;
+            _ = LoadAuxiliaryIconAsync(icon, feature.IconResource);
+            var id = feature.Id;
+            item.Click += (_, _) => OpenAuxiliaryFeature(id);
+            menu.Items.Add(item);
+        }
+        menu.ShowAt(anchor, new FlyoutShowOptions { Placement = FlyoutPlacementMode.Top });
+    }
+
+    private static async Task LoadAuxiliaryImageAsync(Image image, string resource)
+    {
+        image.Source = await IconService.LoadEmbeddedAsync(resource);
+    }
+
+    private static async Task LoadAuxiliaryIconAsync(ImageIcon icon, string resource)
+    {
+        icon.Source = await IconService.LoadEmbeddedAsync(resource);
+    }
+
+    #endregion
 
     #endregion
 
@@ -418,12 +511,10 @@ public sealed partial class MainWindow : Window
         Title = title;
         ToolTipService.SetToolTip(SettingsButton, loc.T("Main.SettingsTooltip"));
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(SettingsButton, loc.T("Main.SettingsTooltip"));
-        ToolTipService.SetToolTip(TodoButton, loc.T("Main.Todo"));
-        ToolTipService.SetToolTip(NoteButton, loc.T("Main.Note"));
-        ToolTipService.SetToolTip(ClipboardButton, loc.T("Main.Clipboard"));
 
-        // 语言切换后重建面板，让 Tab 头/卡片头等动态文字也更新
+        // 语言切换后重建面板，让 Tab 头/卡片头等动态文字也更新；附属功能栏重建保证"更多"菜单文字最新
         RebuildPanel();
+        RebuildAuxiliaryBar();
     }
 
     #endregion
@@ -941,6 +1032,12 @@ public sealed partial class MainWindow : Window
     /// <summary>Tab 风格面板</summary>
     private FrameworkElement BuildTabPanel(LauncherCategory category)
     {
+        // Tab 视觉风格：选中风格（按钮式标签 + 底部高亮条）走自绘实现（第二十轮优化6）
+        if (SettingsService.Instance.Settings.SubCategoryTabVisual == SubCategoryTabVisualStyle.Highlight)
+        {
+            return BuildHighlightTabPanel(category);
+        }
+
         var tabView = new TabView
         {
             Background = null,
@@ -981,6 +1078,108 @@ public sealed partial class MainWindow : Window
         }
 
         return tabView;
+    }
+
+    /// <summary>
+    /// Tab"选中风格"面板（第二十轮优化6）：按钮式标签（选中项高亮）+ 选中项底部的蓝色横条。
+    /// 结构：外层 Grid 三行 —— 标签按钮行（一行 N 列）、高亮条行、内容区；
+    /// 高亮条用 Grid.SetColumn 移到选中标签所在列，天然对齐；内容区只放当前选中的子分类。
+    /// </summary>
+    private FrameworkElement BuildHighlightTabPanel(LauncherCategory category)
+    {
+        var root = new Grid { Background = null };
+        root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Auto) });
+        root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+
+        // 标签行：一行 N 列（Auto 列宽），第 1 行放按钮、第 2 行放高亮条
+        var tabGrid = new Grid { ColumnSpacing = 6, Margin = new Thickness(8, 8, 8, 0) };
+        tabGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Auto) });
+        tabGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Auto) });
+
+        // 底部横条：用系统强调色画刷（默认主题下即蓝色，跟随深浅色和用户强调色）
+        var accentBar = new Border
+        {
+            Height = 3,
+            CornerRadius = new CornerRadius(1.5),
+            Margin = new Thickness(0, 3, 0, 0),
+            Background = (Brush)Application.Current.Resources["AccentFillColorDefaultBrush"]
+        };
+        Grid.SetRow(accentBar, 1);
+
+        // 内容区：只放当前选中子分类的项目容器
+        var contentHost = new Grid();
+        Grid.SetRow(contentHost, 1);
+        root.Children.Add(tabGrid);
+        root.Children.Add(contentHost);
+
+        var buttons = new Dictionary<Guid, Button>();
+
+        // 选中某个子分类：移动高亮条、更新按钮视觉、切换内容区
+        void Select(LauncherSubCategory sub)
+        {
+            _currentTabSub = sub;
+            var index = category.SubCategories.IndexOf(sub);
+            if (index < 0) return;
+
+            Grid.SetColumn(accentBar, index);
+            foreach (var (id, button) in buttons)
+            {
+                var selected = id == sub.Id;
+                button.Background = (Brush)Application.Current.Resources[selected
+                    ? "SubtleFillColorSecondaryBrush"
+                    : "SubtleFillColorTransparentBrush"];
+                SetHeaderFontWeight(button, selected);
+            }
+
+            contentHost.Children.Clear();
+            contentHost.Children.Add(BuildTabContent(category, sub));
+        }
+
+        for (var i = 0; i < category.SubCategories.Count; i++)
+        {
+            var sub = category.SubCategories[i];
+            tabGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Auto) });
+
+            var button = new Button
+            {
+                Content = BuildSubCategoryHeader(sub),
+                Padding = new Thickness(12, 6, 12, 6),
+                CornerRadius = new CornerRadius(6),
+                BorderThickness = new Thickness(0),
+                Background = (Brush)Application.Current.Resources["SubtleFillColorTransparentBrush"]
+            };
+            var subRef = sub;
+            button.Click += (_, _) => Select(subRef);
+            Grid.SetColumn(button, i);
+            tabGrid.Children.Add(button);
+            buttons[sub.Id] = button;
+
+            // 跨子分类拖动目标：把项目拖到标签按钮上即可移动过去（与 TabView 版一致）
+            _panelTargets.Add((sub, button));
+        }
+        tabGrid.Children.Add(accentBar);
+
+        // 保持当前选中的子分类（面板重建后不跳回第一个）
+        Select(_currentTabSub ?? category.SubCategories[0]);
+
+        return root;
+    }
+
+    /// <summary>递归把头部里所有文字的粗细设为选中/未选中（按钮式标签的选中加粗效果）</summary>
+    private static void SetHeaderFontWeight(Button button, bool selected)
+    {
+        var weight = selected ? Microsoft.UI.Text.FontWeights.SemiBold : Microsoft.UI.Text.FontWeights.Normal;
+        void Walk(DependencyObject parent)
+        {
+            var count = VisualTreeHelper.GetChildrenCount(parent);
+            for (var i = 0; i < count; i++)
+            {
+                var child = VisualTreeHelper.GetChild(parent, i);
+                if (child is TextBlock text) text.FontWeight = weight;
+                else Walk(child);
+            }
+        }
+        Walk(button);
     }
 
     /// <summary>Tab 内容容器（项目区 + 拖放/拖动悬停区域）</summary>

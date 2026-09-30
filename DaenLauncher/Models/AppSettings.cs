@@ -22,6 +22,12 @@ public sealed class AppSettings
     /// <summary>软件启动后：显示 或 隐藏</summary>
     public StartBehavior StartBehavior { get; set; } = StartBehavior.Show;
 
+    /// <summary>
+    /// 启动器左下角显示的附属功能（有序 id 列表，最多 3 个，需求）。
+    /// 不在列表里的附属功能通过底栏"更多"菜单访问。
+    /// </summary>
+    public List<string> AuxiliaryVisible { get; set; } = new() { "todo", "note", "clipboard" };
+
     // ===== 外观 =====
 
     /// <summary>应用主题：跟随系统/浅色/深色</summary>
@@ -153,9 +159,54 @@ public sealed class AppSettings
     /// <summary>项目分类：整体在左侧栏的对齐位置</summary>
     public ItemHorizontalAlignment CategoryAlignment { get; set; } = ItemHorizontalAlignment.Left;
 
+    // ===== 待办 =====
+
+    /// <summary>待办是否启用云同步（webnote 便签；false = 数据仅存本地 data\todo）。
+    /// 注意：只有在设置页验证过便签名称和密码后才会置为 true。</summary>
+    public bool TodoCloudSyncEnabled { get; set; } = false;
+
+    /// <summary>云同步便签名称（note_name）</summary>
+    public string TodoNoteName { get; set; } = "";
+
+    /// <summary>云同步便签密码（note_pwd，明文存于本机 settings.json）</summary>
+    public string TodoNotePwd { get; set; } = "";
+
+    /// <summary>待办：使用快捷键 显示/隐藏待办窗口</summary>
+    public bool TodoTriggerHotkey { get; set; } = false;
+
+    /// <summary>待办快捷键的修饰键（Win32 MOD_* 组合值）</summary>
+    public int TodoHotkeyModifiers { get; set; } = 0x0001; // MOD_ALT
+
+    /// <summary>待办快捷键的虚拟键码（Win32 VK_*，默认 '2'）</summary>
+    public int TodoHotkeyVirtualKey { get; set; } = 0x32;
+
+    /// <summary>待办快捷键显示文本（仅界面回显，默认 Alt+2）</summary>
+    public string TodoHotkeyText { get; set; } = "Alt+2";
+
+    /// <summary>待办：永远置顶</summary>
+    public bool TodoAlwaysOnTop { get; set; } = true;
+
+    /// <summary>待办：锁定尺寸（窗口不可调整大小）</summary>
+    public bool TodoLockSize { get; set; } = false;
+
+    /// <summary>待办：重要任务在列表中的底色（TodoColors 标记；None = 不加底色）</summary>
+    public string TodoImportantColor { get; set; } = TodoColors.Yellow;
+
+    /// <summary>待办：窗口显示位置（上次位置视为桌面中央）</summary>
+    public ShowPosition TodoShowPosition { get; set; } = ShowPosition.Center;
+
+    /// <summary>子分类 Tab 的视觉风格（仅 Tab 风格下有效，默认选中风格）</summary>
+    public SubCategoryTabVisualStyle SubCategoryTabVisual { get; set; } = SubCategoryTabVisualStyle.Highlight;
+
     /// <summary>上次窗口位置 X（物理像素，-1 = 还没记录过）</summary>
     public int LastWindowX { get; set; } = -1;
 
     /// <summary>上次窗口位置 Y（物理像素，-1 = 还没记录过）</summary>
     public int LastWindowY { get; set; } = -1;
+
+    /// <summary>待办窗口上次位置 X（物理像素，-1 = 还没记录过）</summary>
+    public int TodoLastWindowX { get; set; } = -1;
+
+    /// <summary>待办窗口上次位置 Y（物理像素，-1 = 还没记录过）</summary>
+    public int TodoLastWindowY { get; set; } = -1;
 }
