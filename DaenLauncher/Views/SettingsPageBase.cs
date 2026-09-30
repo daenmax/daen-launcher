@@ -126,6 +126,7 @@ public static class FluentGlyphs
     public const string Edit = "\uE70F";         // 铅笔：编辑/标题
     public const string Save = "\uE74E";         // 软盘：导出
     public const string OpenFile = "\uE8E5";     // 打开文件夹：导入
+    public const string Folder = "\uE8B7";       // 文件夹：打开配置目录
     public const string Delete = "\uE74D";       // 垃圾桶：删除
     public const string Home = "\uE80F";         // 房子：显示位置
     public const string BulletedList = "\uE8FD"; // 项目符号列表：分类

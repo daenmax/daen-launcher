@@ -224,10 +224,50 @@ public sealed class DataPage : SettingsPageBase
 
     public DataPage()
     {
+        BuildOpenFolderCard();
         BuildExportCard();
         BuildImportCard();
         BuildDeleteCard();
         RefreshCheckStates();
+    }
+
+    /// <summary>打开配置文件目录卡片：显示实际使用的 data 目录路径，并可一键用资源管理器打开。
+    /// 显示真实路径是为了让用户一眼看出数据实际在哪（exe 同级不可写时会回退到 LocalAppData）。</summary>
+    private void BuildOpenFolderCard()
+    {
+        var pathText = new TextBlock
+        {
+            Text = DataPathService.DataRoot,
+            FontSize = 12,
+            Opacity = 0.7,
+            IsTextSelectionEnabled = true,
+            TextWrapping = TextWrapping.Wrap
+        };
+
+        var openButton = new Button { Content = LocalizationService.Tr("Data.OpenFolder.Button"), Margin = new Thickness(0, 8, 0, 0) };
+        openButton.Click += (_, _) => OpenDataFolder();
+
+        var content = new StackPanel { Spacing = 4 };
+        content.Children.Add(pathText);
+        content.Children.Add(openButton);
+        MakeCard(FluentGlyphs.Folder, "Data.OpenFolder", "Data.OpenFolder.Sub", content);
+    }
+
+    /// <summary>用资源管理器打开当前使用的 data 根目录</summary>
+    private void OpenDataFolder()
+    {
+        try
+        {
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = "explorer.exe",
+                Arguments = $"\"{DataPathService.DataRoot}\""
+            });
+        }
+        catch
+        {
+            // 打开失败（极罕见）不影响其他功能
+        }
     }
 
     /// <summary>导出勾选框行</summary>

@@ -46,6 +46,9 @@ public sealed partial class MainWindow : Window
     // 拖动中源按钮的透明度：变淡表示"正在被拖走"，拖动结束后恢复
     private const double DragSourceOpacity = 0.45;
 
+    // 触发让位的覆盖比例：拖动图标覆盖某项目 ≥70% 面积才重排（低覆盖不触发，防抖动）
+    private const double DragCoverThreshold = 0.7;
+
     // 当前拖拽会话的项目（DragStarting 记录，Drop/DropCompleted 清空）
     private LauncherItem? _dragItem;
     private LauncherSubCategory? _dragItemSub;
@@ -1273,51 +1276,63 @@ public sealed partial class MainWindow : Window
         ResetItemDrag();
     }
 
-    /// <summary>按指针位置实时移动被拖按钮（最近中心算法：拖到哪个项目旁边就插到哪）。
-    /// 平铺（水平流）看指针在最近项目中心的左/右；列表（垂直流）看上/下。
-    /// 拖动过程中只调整 UI 顺序，数据顺序在松手时统一落库（见 ItemPanel_Drop）。</summary>
+    /// <summary>按"覆盖面积"判定重排：跟随鼠标的拖动图标覆盖某项目 ≥70% 面积时，
+    /// 视为"要放到这个位置"——被拖按钮精确落到被覆盖项目原来的格子上：
+    /// 往前拖时目标及其后项目往后让位；往后拖时沿途项目往前补位。
+    /// 其他项目配合 RepositionThemeTransition 平滑滑动。
+    /// 覆盖不足阈值时完全不动（带迟滞，解决"最近中心"算法一碰就换位的抖动问题）。</summary>
     private void MoveDraggedButtonByPosition(Panel itemsPanel, Windows.Foundation.Point position)
     {
         if (_dragButton == null || !itemsPanel.Children.Contains(_dragButton)) return;
+        var ghostWidth = _dragButton.ActualWidth;
+        var ghostHeight = _dragButton.ActualHeight;
+        if (ghostWidth <= 0 || ghostHeight <= 0) return;
 
-        // 找中心离指针最近的其他项目
-        Button? nearest = null;
-        double bestDist = double.MaxValue;
+        // 跟随鼠标的拖动快照近似为：以指针为中心、与被拖按钮同尺寸的矩形
+        var ghost = new Windows.Foundation.Rect(
+            position.X - ghostWidth / 2, position.Y - ghostHeight / 2,
+            ghostWidth, ghostHeight);
+
+        // 找覆盖比例最高、且达到阈值的目标项目
+        Button? target = null;
+        double bestRatio = DragCoverThreshold;
         foreach (var child in itemsPanel.Children)
         {
             if (child is not Button b || b == _dragButton || b.Tag is not LauncherItem) continue;
+            if (b.ActualWidth <= 0 || b.ActualHeight <= 0) continue;
             var bounds = b.TransformToVisual(itemsPanel).TransformBounds(
                 new Windows.Foundation.Rect(0, 0, b.ActualWidth, b.ActualHeight));
-            var cx = bounds.X + bounds.Width / 2;
-            var cy = bounds.Y + bounds.Height / 2;
-            var dx = cx - position.X;
-            var dy = cy - position.Y;
-            var dist = dx * dx + dy * dy;
-            if (dist < bestDist)
+
+            // 计算幽灵与该项目的重叠区域（相交矩形）
+            var overlapW = Math.Min(bounds.X + bounds.Width, ghost.X + ghost.Width)
+                         - Math.Max(bounds.X, ghost.X);
+            var overlapH = Math.Min(bounds.Y + bounds.Height, ghost.Y + ghost.Height)
+                         - Math.Max(bounds.Y, ghost.Y);
+            if (overlapW <= 0 || overlapH <= 0) continue;
+
+            var ratio = overlapW * overlapH / (b.ActualWidth * b.ActualHeight);
+            if (ratio > bestRatio)
             {
-                bestDist = dist;
-                nearest = b;
+                bestRatio = ratio;
+                target = b;
             }
         }
-        if (nearest == null) return;
+        if (target == null) return; // 没有项目被覆盖到阈值：保持原位
 
-        // 指针在最近项目中心的哪一侧决定插到前面还是后面
-        var nb = nearest.TransformToVisual(itemsPanel).TransformBounds(
-            new Windows.Foundation.Rect(0, 0, nearest.ActualWidth, nearest.ActualHeight));
-        var pdx = position.X - (nb.X + nb.Width / 2);
-        var pdy = position.Y - (nb.Y + nb.Height / 2);
-        // 平铺（等宽换行面板，水平流）看水平方向；列表（固定单列，垂直流）看垂直方向
-        var isVerticalFlow = itemsPanel is UniformWrapPanel { FixedColumns: 1 };
-        var after = isVerticalFlow ? pdy > 0 : pdx > 0;
-
-        var nearestIndex = itemsPanel.Children.IndexOf(nearest);
-        var draggedIndex = itemsPanel.Children.IndexOf(_dragButton);
-        var targetIndex = after ? nearestIndex + 1 : nearestIndex;
-        if (targetIndex > draggedIndex) targetIndex--; // 移除自身后索引左移
-        if (targetIndex == draggedIndex) return; // 位置没变就不动，避免反复重排
+        // 拼接移动：先移除自己，再插到 targetIndex——两种方向都精确落在
+        // "被覆盖项目原来的格子"上（这正是"放到这个位置"的含义）：
+        // - 往前拖（目标在自己前面）：目标还留在 targetIndex，插到它前面
+        //   → 目标及其后项目依次往后让一位；
+        // - 往后拖（目标在自己后面）：移除自己后目标已往前滑到 targetIndex-1，
+        //   插到 targetIndex 正好在它后面 → 落在目标原格子上，目标往前补一位
+        //   （此前用 targetIndex-1 插到目标之前，导致往后拖永远慢一格、
+        //   拖到紧邻的下一格还会被"位置没变"守卫拦掉完全不响应）。
+        var oldIndex = itemsPanel.Children.IndexOf(_dragButton);
+        var targetIndex = itemsPanel.Children.IndexOf(target);
+        if (targetIndex == oldIndex) return;
 
         itemsPanel.Children.Remove(_dragButton);
-        itemsPanel.Children.Insert(Math.Min(targetIndex, itemsPanel.Children.Count), _dragButton);
+        itemsPanel.Children.Insert(targetIndex, _dragButton);
     }
 
     /// <summary>重置项目拖动会话状态</summary>
@@ -1422,6 +1437,11 @@ public sealed partial class MainWindow : Window
         button.RightTapped += (s, e) => ShowItemContextMenu(button, item, sub);
 
         // ===== 拖动排序（需求-布局4，原生拖放动画）=====
+        // 重排滑动动画：拖动让位时，其他项目平滑滑到新格子（DeskBox 文件格子同款过渡）
+        button.Transitions = new Microsoft.UI.Xaml.Media.Animation.TransitionCollection
+        {
+            new Microsoft.UI.Xaml.Media.Animation.RepositionThemeTransition { IsStaggeringEnabled = false }
+        };
         // CanDrag 开启后按住拖动即可原生拖拽……但 Button 会吞掉指针输入，
         // 系统不会自动发起拖拽，所以还要手动检测阈值后调 StartDragAsync（见下方指针事件）。
         // DragStarting 里做锁定图标判断和会话记录，DragOver/Drop 由所在面板处理

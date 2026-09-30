@@ -124,9 +124,33 @@ build.bat / clean.bat   双击可用的编译/清理脚本
 - **修复：彻底无法拖动（用户实测）**：`Button.CanDrag=true` 在 WinUI 3 上**不会自动发起拖拽**——ButtonBase 吞掉指针输入，系统的"按住拖动"手势检测永远不触发（微软 Q&A 确认是设计限制，TextBox 同样）。而 DeskBox 对 Button 类元素（Todo 颜色筛选按钮）的真正做法是：**保留 CanDrag + DragStarting 填数据包，但用指针事件手动检测拖动阈值（5px），超过后 `await button.StartDragAsync(e.GetCurrentPoint(button))` 主动发起原生拖拽**，之后 DragStarting/DragOver/Drop/DropCompleted 全套原生流程照常走。落地：ItemButton_PointerPressed/Moved（AddHandler handledEventsToo:true，阈值 25）/Released/CaptureLost + StartDragAsync；恢复 `_suppressClickUntil`（拖拽发起后短时间屏蔽 Click 防误启动，LaunchItem 守卫同步恢复）。
 - **测试**：Release 编译 0 错误（产物 build\DaenLauncher.exe）；拖动手感/外部拖入/跨子分类移动待用户实测。
 
+## 最新变更（2026-09-30 第十二轮：重排改"覆盖 70% 触发 + 让位滑动动画"）
+- **回滚点**：第十一轮修好的拖拽版本已提交 git（commit 991b8b1"检查点：拖动图标原生拖拽动画可用版本"），随时可回滚。参考项目\（45MB 第三方参考代码）刻意未纳入 git。
+- **需求**：用户反馈"最近中心"算法过于抖动（指针一碰邻格就换位），改为——拖动图标**覆盖某项目 ≥70% 面积**才判定"要放到这个位置"，被覆盖项目及其后项目整体往后让一位，并加滑动动画。
+- **实现**（MainWindow.xaml.cs）：
+  - `DragCoverThreshold = 0.7` 常量；`MoveDraggedButtonByPosition` 重写：跟随鼠标的快照近似为"以指针为中心、与被拖按钮同尺寸"的矩形，遍历项目算相交面积/目标面积，取覆盖比例最高且 ≥70% 的为目标；**拼接移动**：移除自己 → 插到 targetIndex（见下），覆盖不足则完全不动（迟滞防抖）。平铺/列表通吃，不再需要区分水平流/垂直流（旧的方向判断逻辑删除）。
+  - **修复：往前拖（前面项目拖到后面）不好使**：最初对"目标在自己后面"的情况用了 `targetIndex-1`（插到目标之前）→ 被拖按钮永远落后指针一格、盖住紧邻下一格时插入位==当前位被 no-op 守卫拦掉完全没反应。正确做法：**移除自己后一律插到 targetIndex**——往前拖 = 插到目标之前（目标及其后往后让位）；往后拖 = 移除后目标已前滑一位，插到 targetIndex 正好在它之后（落在目标原格子上）。两方向都精确落在"被覆盖项目原来的格子"。
+  - **滑动动画**：BuildItemButton 给按钮挂 `RepositionThemeTransition { IsStaggeringEnabled=false }`（DeskBox 文件格子同款），格子位置变化时平滑滑动（被拖按钮自己滑进空位，被让位的项目滑到新格子）。TransitionCollection/RepositionThemeTransition 都在 `Microsoft.UI.Xaml.Media.Animation` 命名空间（该文件只 using 到 Media，需全限定）。
+- **稳定性推演**：触发后被拖按钮精确落在被覆盖项目的原格子上，指针正好位于自己身上（自身不参与判定）→ 不回弹；触发后指针继续盖着同一目标时 no-op 守卫兜底。
+- **测试**：Release 编译 0 错误；手感（触发灵敏度、动画效果）待用户实测，阈值 DragCoverThreshold 可调。
+
+## 最新变更（2026-09-30 第十三轮：更换 logo + 任务栏旧图标缓存修复）
+- **更换 logo**（上一会话完成）：Assets/logo 三件套（logo_1024.png / logo_64.png / logo_图标组.ico）换新，exe 文件图标（csproj 的 ApplicationIcon）、标题栏、托盘、设置窗口全部引用新资源。
+- **任务栏残留旧 logo——两层缓存**：
+  - ① **应用自身缓存**：`IconService.EnsureAppIconExtracted` 把内嵌 ico 释放到 `data\icon\cache\app.ico` 供 WM_SETICON/ SetIcon 使用，原逻辑"文件存在就不再释放"→ 从旧版升级的用户永远用残留的旧 ico。已改为**内嵌资源与缓存文件字节比对，不一致即重写**（升级后首次启动自动刷新）。
+  - ② **Windows 资源管理器图标缓存**：Explorer 按 exe 路径缓存任务栏图标，换 exe 后旧图标可能残留，需重启 explorer / 清 iconcache_*.db / 重新固定任务栏（应用侧无法干预）。
+- **app.rc 引用修正**：原引用已删除的 `Assets/logo/app.ico`（现仅在 .trash），改为 `logo_图标组.ico`，防止将来重新接入 rc 编译时构建失败（当前构建链不编译 .rc，exe 图标实际来自 `<ApplicationIcon>`）。
+- **测试**：按用户要求未测试，由用户自测（跑新 exe 自动刷新缓存 + 必要时重启 explorer）。
+
+## 最新变更（2026-09-30 第十四轮：任务栏旧图标真相 + 打开配置目录按钮）
+- **任务栏旧 logo 真相（重要）**：用户改名 exe 测试仍显示旧图标 + data 目录"不自动创建"——根因是**旧版本实例一直没退出**（桌面 `新建文1件夹\DaenLauncher.exe`，早于新编译启动）。单实例互斥体使新 exe（含改名副本）启动时只激活旧实例就退出，用户看到的任务栏图标、data 目录行为全部来自旧进程。已 force kill 旧实例；新 exe 正常运行即可看到新图标（Explorer 图标缓存如残留再重启 explorer）。**教训：单实例应用测试新版本前，必须先从托盘退出旧实例。**
+- **新功能 打开配置文件目录**：设置-数据页新增第一张卡片——显示实际使用的 DataRoot 真实路径（可选中文本）+ "打开目录"按钮（explorer.exe 打开，LocalAppData 回退时用户也能看出数据实际位置）。新增 FluentGlyphs.Folder（\uE8B7）和语言键 Data.OpenFolder / .Sub / .Button（zh/en 各 3 键，218 键两边对齐 0 缺失）。
+- **测试**：按用户要求未整体测试，由用户自测（语言键完整性已脚本校验通过）。
+
 ## 当前进度
-- ✅ 需求1.md 主体 + 十一轮改进/修复全部完成。
-- ⚠️ 待用户实测：第十一轮改动（原生拖拽动画、跨子分类拖动、外部拖入回归）。
+- ✅ 需求1.md 主体 + 十四轮改进/修复全部完成。
+- ⚠️ 待用户实测：第十二轮（覆盖 70% 触发重排 + 滑动动画）、第十三轮（任务栏图标缓存修复）、第十四轮（打开配置目录按钮）。
+- 📌 回滚点：commit 991b8b1（第十一轮拖拽可用版本）。第十二轮起改动尚未提交，确认手感后再提交新检查点。
 
 ## 待办事项
 - 用户实测后修 bug。
@@ -161,3 +185,4 @@ build.bat / clean.bat   双击可用的编译/清理脚本
 16. **Button 上 CanDrag 不自动发起拖拽**：ButtonBase（Button/TextBox 等）吞掉指针输入，系统"按住拖动"手势检测不触发（微软 Q&A 确认的设计限制）→ 参考 DeskBox：CanDrag=true + 指针事件手动检测阈值（AddHandler handledEventsToo:true 收 PointerPressed/Moved）+ `await button.StartDragAsync(e.GetCurrentPoint(button))` 主动发起；StartDragAsync 的 await 到拖拽会话结束才返回，之后走 DragStarting/DragOver/Drop/DropCompleted 原生流程；发起后要短时间屏蔽 Click 防误启动。
 17. **原生拖放识别"自己拖的"**：DragStarting 往 `args.Data.Properties[key]` 写标记，DragOver/Drop 里从 `e.DataView.Properties.TryGetValue(key, ...)` 读回（同应用拖放标记一直在，DeskBox 同款做法）；内部拖动的 DragOver 若不处理要保持"未处理"状态，事件会冒泡到外层 AllowDrop 容器（PanelHost），外部文件拖放因此不受影响。
 18. **CS0136 同名局部变量**：方法体块里先在嵌套 if 块中声明 `x`、后面又在方法级声明 `x` 会报 CS0136（C# 的块作用域是整个块，不管声明先后顺序）——嵌套块里的换名即可。
+19. **图标缓存有两层**：换 logo 后"任务栏还是旧图标"要先分清——① 应用自己的 `data\icon\cache\app.ico`（EnsureAppIconExtracted 现按字节比对自动刷新）；② Windows 资源管理器的图标缓存（按 exe 路径缓存，重启 explorer / 删 `%LocalAppData%\IconCache.db` 和 `%LocalAppData%\Microsoft\Windows\Explorer\iconcache_*.db` / 取消重新固定任务栏才能刷新）。验证技巧：把 exe 复制改名再跑，若任务栏显示新图标即实锤是系统缓存。

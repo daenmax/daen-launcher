@@ -88,19 +88,33 @@ public static class IconService
     /// <summary>
     /// 把内嵌的应用 ico（多尺寸：16~256px）释放到 data\icon\cache\app.ico，
     /// 供 AppWindow.SetIcon（任务栏/标题栏）使用。返回 ico 文件路径；失败返回 null。
+    /// 注意：缓存文件会和内嵌资源做字节比对，不一致（换 logo 升级后的残留旧文件）就重新释放，
+    /// 否则升级后任务栏/标题栏会一直显示旧图标。
     /// </summary>
     public static string? EnsureAppIconExtracted()
     {
         try
         {
             var icoPath = System.IO.Path.Combine(DataPathService.IconCacheDir, "app.ico");
-            if (!System.IO.File.Exists(icoPath))
+
+            // ico 只有几十 KB，每次启动读一遍内嵌字节开销可忽略
+            var assembly = System.Reflection.Assembly.GetExecutingAssembly();
+            using var stream = assembly.GetManifestResourceStream("DaenLauncher.Assets.logo.logo_图标组.ico");
+            if (stream == null) return null;
+            using var ms = new System.IO.MemoryStream();
+            stream.CopyTo(ms);
+            var bytes = ms.ToArray();
+
+            // 缓存文件不存在或内容和内嵌资源不一致（旧版本残留）时重写
+            var needsWrite = true;
+            if (System.IO.File.Exists(icoPath))
             {
-                var assembly = System.Reflection.Assembly.GetExecutingAssembly();
-                using var stream = assembly.GetManifestResourceStream("DaenLauncher.Assets.logo.logo_图标组.ico");
-                if (stream == null) return null;
-                using var fs = System.IO.File.Create(icoPath);
-                stream.CopyTo(fs);
+                var cached = System.IO.File.ReadAllBytes(icoPath);
+                needsWrite = cached.Length != bytes.Length || !cached.AsSpan().SequenceEqual(bytes);
+            }
+            if (needsWrite)
+            {
+                System.IO.File.WriteAllBytes(icoPath, bytes);
             }
             return System.IO.File.Exists(icoPath) ? icoPath : null;
         }
