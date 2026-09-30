@@ -28,7 +28,7 @@ DaenLauncher/
   Services/  DataPathService、JsonStore、SettingsService、LauncherDataService、
              LocalizationService、IconService、ItemIconService、LnkResolver、
              LauncherRunner、AutoStartService、TrayService、InputHookService、
-             Win32Helper、ShellContextMenuHelper、DropResolver、DataService、
+             Win32Helper、DropResolver、DataService、
              ThemeService、AppInfoService、RelayCommand
   Assets/    appconfig.json、logo、设置图标（全部 EmbeddedResource）
   Languages/ zh-CN.json、en-US.json（EmbeddedResource，启动时释放到 data\language）
@@ -42,7 +42,7 @@ build.bat / clean.bat   双击可用的编译/清理脚本
 - **单实例**：Mutex `DaenLauncher_SingleInstance_Mutex` + EventWaitHandle `DaenLauncher_Activate_Event`；二实例等旧实例 3 秒（重启场景）后 Set 事件退出；主实例 RegisterWaitForSingleObject 显示主窗口。
 - **InputHookService**：WH_MOUSE_LL（侧键/中键）+ WH_KEYBOARD_LL（Ctrl/Alt 双击检测）全局钩子。
 - **热键**：RegisterHotKey 注册在主窗口 HWND，comctl32 SetWindowSubclass 拦 WM_HOTKEY。
-- **ShellContextMenuHelper**：IShellFolder+IContextMenu3 COM 弹出系统右键菜单（含 owner-draw 消息转发）。
+- ~~**ShellContextMenuHelper**~~：已于第十九轮彻底移除（需求放弃，见第十九轮与关键决策补充）。
 - **ItemIconService**：SHGetFileInfo 提取图标 → png 缓存到 data\icon\cache\<ItemId>.png + .meta 记录源路径。
 - **DataService**：导出（勾选项打包 zip，zip 内前缀 data/）、导入（先备份 data→日期目录，删旧再解压）、删除。
 - **窗口显隐**：主/设置窗口 Closing 事件 `e.Cancel=true` + Hide（`App.IsExiting` 区分退出）；主窗口去掉 WS_SYSMENU 实现无系统标题栏按钮。
@@ -147,9 +147,74 @@ build.bat / clean.bat   双击可用的编译/清理脚本
 - **新功能 打开配置文件目录**：设置-数据页新增第一张卡片——显示实际使用的 DataRoot 真实路径（可选中文本）+ "打开目录"按钮（explorer.exe 打开，LocalAppData 回退时用户也能看出数据实际位置）。新增 FluentGlyphs.Folder（\uE8B7）和语言键 Data.OpenFolder / .Sub / .Button（zh/en 各 3 键，218 键两边对齐 0 缺失）。
 - **测试**：按用户要求未整体测试，由用户自测（语言键完整性已脚本校验通过）。
 
+## 最新变更（2026-09-30 第十五轮：Shell 菜单正式回归——右键项目打开资源管理器菜单）
+- **背景**：第六轮曾按需求把 ShellContextMenuHelper 下线（备份在 .trash），菜单项占位显示"开发中"。本轮正式做回来，直接复用第四/五轮已调通的实现（当时的坑全部有解：非文件系统路径守卫、IContextMenu3→2→接口降级、SetForegroundWindow、lpVerb 直接用菜单 id、专用 STA 线程）。
+- **恢复 + 完善 ShellContextMenuHelper.cs**（从 .trash 复制回来）：
+  - 签名简化为 `ShowContextMenu(path, screenX, screenY)`——删掉从未使用的 ownerHwnd 参数/字段（Helper 自己在调用线程上建隐藏顶层窗口做 owner，message-only 窗口无法 SetForegroundWindow）。
+  - 新增防重入守卫（Interlocked 标记）：同一时刻只允许一个 Shell 菜单，第二个请求忽略（静态接口引用会在窗口过程里转发消息，并发会串）。
+  - finally 里清空静态接口引用 + 释放标记：异常中断也不残留失效对象。
+- **MainWindow 接线**：右键菜单"打开资源管理器菜单"→ `ShowShellContextMenuForItem(item)`：
+  - Url/Protocol/Uwp 无本地文件 → 弹提示（新键 Main.ShellMenu.NotSupported）；
+  - 路径为空/不存在 → 弹提示（新键 Main.ShellMenu.PathMissing）；
+  - 有效路径 → DispatcherQueue.TryEnqueue 延迟一拍（等 WinUI 菜单完全关闭）→ GetCursorPos 取鼠标处为弹出位置 → **专用 STA 线程**执行整个 Shell 菜单流程。
+- **语言**：zh-CN/en-US 各 +2 键（Main.ShellMenu.NotSupported / .PathMissing，220 键对齐）。
+- **测试**：Debug 编译 0 错误 0 警告；菜单弹出/命令执行待用户实测（此前第五轮已端到端实测过同款实现：菜单完整弹出含图标和第三方扩展、点菜单项命令真实执行）。
+
+## 最新变更（2026-09-30 第十六轮：修复 Shell 菜单"能弹出但点击无效"）
+- **用户实测**：第十五轮后菜单能正常弹出（含图标和第三方扩展），但点任何菜单项都没反应。
+- **根因：lpVerb 整体偏移一位**。`CMINVOKECOMMANDINFO.lpVerb` 官方约定是**相对 idCmdFirst 的偏移量**，第五轮代码 `lpVerb = (IntPtr)cmd` 直接传了绝对菜单 id（idCmdFirst=1），点第 1 项实际执行偏移 1 的第 2 条命令，点最后一项超出范围 → 无效/E_INVALIDARG。
+- **第五轮错误结论的来源（纠正）**：当时的控制台隔离测试大概率用了 `idCmdFirst = 0`（菜单 id 即偏移，"直接用 cmd"恰好正确、"减 1"恰好越界 E_INVALIDARG），但把结论照搬到了正式代码的 `idCmdFirst = 1` 上 → 整体偏移一位。**教训：lpVerb 必须始终用 `cmd - idCmdFirst`，idCmdFirst 是多少由自己的 QueryContextMenu 调用决定。**
+- **修复**（ShellContextMenuHelper.cs，参考 ChatGPT 分析验证）：① `lpVerb = cmd - 1`；② `CMINVOKECOMMANDINFO.hwnd` 传隐藏宿主窗口（此前传 Zero，部分会弹 UI 的命令需要宿主）；③ `GetUIObjectOf` 也传宿主窗口；④ invoke 失败日志带上 cmd/verbOffset/hr 便于继续定位。
+- **保留不动**：专用 STA 线程、IContextMenu3→2→1 降级、隐藏 owner 窗口、SetForegroundWindow、owner-draw 消息转发。
+- **测试**：Debug 编译 0 错误 0 警告；命令执行待用户实测（若仍有个别第三方扩展命令无效，查 crash.log 的 verbOffset/hr）。
+
+## 最新变更（2026-09-30 第十七轮：彻底修复 Shell 菜单点击无效——Windows 11 命令表重排适配）
+- **用户实测**：第十六轮 `cmd-1` 后依然全无反应。crash.log 抓到实锤：`invoke failed cmd=151 verbOffset=150 hr=0x80070057`、`cmd=20 → 19 → 同样失败`。
+- **独立控制台复现程序**（%TEMP%\ShellCtxTest，完整复刻 Helper 流程 + 全量日志 + 自动键盘/鼠标点击）拿到决定性数据：
+  - QueryContextMenu 返回码 R=199（不是"最大ID"而是命令总数）；
+  - 菜单共 40 项但 ID 稀疏：打开=164、编辑=167、属性=20、复制路径=196——**ID ≠ idCmdFirst+序号**；
+  - `GetCommandString` 全表扫描（0..204 逐个探动词，无副作用）显示 'open' 在槽 136=164-28、'edit' 在 139=167-28、'CopyAsPath' 在 168=196-28……全部差 **基数 28**；
+  - `InvokeCommand(cmd-1)`、`InvokeCommand(cmd)`、EX 结构体 + UNICODE + ptInvoke 全部 E_FAIL/E_INVALIDARG；
+  - **`InvokeCommand(cmd-28)` → S_OK 且 test.txt 真实打开**（记事本++ 窗口标题验证）。
+- **根因（Windows 11 行为）**：菜单弹出过程中 Shell 会重排内部命令表——弹出前"槽位=ID-idCmdFirst"（教科书态，'properties' 在槽 19）；弹出后现代命令部分整体 +经典块大小（本机 27），即 ID=槽位+28，而经典命令（剪切/复制/删除/属性/创建快捷方式）ID 不变。教科书公式在弹出后的状态上整体偏移 → 全部失败。第五轮"直接用 cmd 可用"的错误结论也是同一机制的误观测。
+- **base 的运行时求法（无副作用）**：`base = R - V`，R=QueryContextMenu 返回码，V=用 GCS_VALIDATEW（只验证存在、不执行）从高到低探到的最大有效槽位。本机 199-171=28。该公式同时兼容 Win10（V=R-1 → base=1 → 退化为教科书公式）。
+- **修复后的完整算法**（ShellContextMenuHelper.ShowContextMenuCore）：
+  1. QueryContextMenu(idCmdFirst=1) 记录 R；
+  2. 菜单弹出（原有逻辑不变：STA 线程/隐藏窗口/SetForegroundWindow/消息转发）；
+  3. 用户选中 cmd 后：`base = R - FindMaxValidSlot()`；`verbOffset = cmd >= base ? cmd - base : cmd - IdCmdFirst`；
+  4. 安全兜底：GCS_VALIDATE 验证槽位存在才执行，否则记日志放弃（宁可不动也不乱发命令）；
+  5. `CMINVOKECOMMANDINFOEX` + `CMIC_MASK_UNICODE|CMIC_MASK_PTINVOKE` + ptInvoke=弹出点 执行，失败记 verb/hr 到 crash.log。
+- **测试**：复现程序端到端验证（打开→记事本++ 打开文件 ✓）；Debug 编译 0 错误 0 警告；build.bat 已出 Release exe 待用户实测。
+
+## 最新变更（2026-09-30 第十八轮：修复点击菜单项百分百闪退——改用动词字符串调用）
+- **用户实测**：第十七轮后点任意菜单项百分百闪退。事件查看器实锤：0xc0000005 访问违例、故障模块 = DaenLauncher.exe 自身（进程内 COM 状态被破坏的典型特征），点 3 次崩 3 次。
+- **直接根因（我的低级错误）**：探测命令槽位时把 `GCS_VALIDATEW` 写成了 **6——那是 GCS_INVALIDATEW（"使命令失效/释放资源"）**！等于朝 Shell 处理器连发 ~28 次"作废你的状态"然后紧接着 InvokeCommand → 进程内访问违例。正确值是 **7**。（教训：Win32 常量必须核对官方文档，GCS_VERBA=0/HELPTEXTA=1/INVALIDATEA=2/VALIDATEA=3/VERBW=4/HELPTEXTW=5/INVALIDATEW=6/**VALIDATEW=7**。）
+- **更深层发现**：用正确常量重新实测后发现 **默认 Shell 处理器根本不支持 GCS_VALIDATE**（第三方处理器支持，到槽 134 就断了，'open' 在 136）→ 第十七轮的 base = R - V 公式不可靠，废弃。且命令表布局**无法稳定预测**，一切"菜单ID算数"都不可靠。
+- **最终方案（v3，端到端验证通过）——字符串调用绕开命令表**：
+  1. 弹出前（QueryContextMenu 之后、TrackPopupMenuEx 之前）：枚举顶层菜单项，`GetCommandString(id - idCmdFirst, GCS_VERBW)` 记录每个 ID 的规范动词名（此时是教科书布局，可信；实测 test.txt 记录到 17 个动词，164='open'、167='edit'…）。GCS_VERBW 是纯读取、无副作用。
+  2. WndProc 捕获 WM_MENUSELECT（0x011F，wParam 低16位=项id、lParam=所在菜单 HMENU），记住最后一次真实选中；**忽略 0xFFFF（菜单关闭通知）避免覆盖**。
+  3. 点击后：若选中项是顶层项且记录到了动词名 → **InvokeCommand 传动词名字符串**（CMINVOKECOMMANDINFOEX 的 lpVerb=ANSI、lpVerbW=宽字符，UNICODE|PTINVOKE 标志）。字符串按名字解析命令，**完全绕开被重排的命令表**（实测 S_OK 且文件真实打开）。
+  4. 子菜单项/无动词名的项：用"动词名匹配投票"测平移量 s（弹出前每个已记录项的槽位是 id-1；在弹出后的表里找同名词槽位，s = (id-1)-槽位，取票数最多的 s，实测 27）→ 槽位 = cmd-idCmdFirst-s → 该槽位有动词名就仍走字符串，没有才用数字偏移（全部记日志）。
+  5. 防御：verb 为空且槽位为负时不调用（lpVerb 高位非 0 会被当字符串指针解引用）；不用 Marshal.DestroyStructure（会把装整数偏移的 IntPtr 字段当指针释放）；释放 COM 对象前先清空静态引用（防 WndProc 竞态）。
+- **验证记录**：复现程序（%TEMP%\ShellCtxTest）端到端：pre-recorded 17 verbs → shift=27（投票）→ slot 136 verb='open' → InvokeCommand S_OK → test.txt 真实打开（Notepad++ 标题确认）。字符串调用在弹出后状态下同样有效（run8）。
+- **测试**：Debug 0 错误 0 警告；build.bat 已出 Release exe。待用户实测（重点：顶层项"打开/属性"、子菜单项如压缩软件、第三方扩展项）。
+
+## 最新变更（2026-09-30 第十九轮：彻底放弃"资源管理器菜单"需求，相关代码全部移除）
+- **用户决定**：第十八轮修复后实测只有第一个"打开"菜单项能执行，其余仍无效，**用户决定彻底放弃该需求**。
+- **已删除**（ShellContextMenuHelper.cs 已按规范备份到 .trash/DaenLauncher/Services/，同名旧备份加时间戳后缀）：
+  - `Services/ShellContextMenuHelper.cs` 整个文件（含全部 COM 互操作）；
+  - MainWindow 项目右键菜单里的"打开资源管理器菜单"菜单项及 `ShowShellContextMenuForItem` 方法；
+  - 语言键 Main.Item.ShellMenu / Main.ShellMenu.NotSupported / Main.ShellMenu.PathMissing（zh/en 各删 3 键，现 217 键两边对齐 0 缺失）；
+  - 临时诊断程序 %TEMP%\ShellCtxTest。
+- **测试**：Debug 编译 0 错误 0 警告；build.bat 已出 Release exe。项目右键菜单回归为：以管理员身份运行 / 打开所在位置 / 复制完整路径 / 删除项目 / 编辑项目。
+
+## 关键决策（补充）——为什么放弃"资源管理器菜单"需求
+- Windows 11 的 IContextMenu 经典菜单实现破坏了教科书契约：命令表在菜单弹出过程中被重排（本机实测菜单 ID 稀疏且弹出前后布局还会变），`lpVerb = cmd - idCmdFirst` 不可用；动词字符串调用只对部分命令有效（实测仅"打开"），GCS_VALIDATE 又不被默认处理器支持。经 4 轮修复（第十五~十八轮）仍无法让全部菜单项可靠执行，且中间过程引入过进程内访问违例（0xc0000005）。**结论：在 WinUI 3 宿主里可靠弹出并执行 Windows 11 的完整 Shell 右键菜单目前没有稳定可行的纯 Win32 路径，需求放弃。** 若将来重启此需求，考虑的方向是只提供固定 canonical 动词（open/runas/properties 等自绘菜单），不再托管完整 Shell 菜单。
+
+
 ## 当前进度
-- ✅ 需求1.md 主体 + 十四轮改进/修复全部完成。
-- ⚠️ 待用户实测：第十二轮（覆盖 70% 触发重排 + 滑动动画）、第十三轮（任务栏图标缓存修复）、第十四轮（打开配置目录按钮）。
+- ✅ 需求1.md 主体 + 十八轮改进/修复全部完成；**"资源管理器菜单"需求已在第十九轮彻底移除（用户决定放弃）**。
+- ⚠️ 待用户实测：第十二轮（覆盖 70% 触发重排 + 滑动动画）、第十三轮（任务栏图标缓存修复）、第十四轮（打开配置目录按钮）、第十九轮（确认右键菜单已无"资源管理器菜单"项且其余功能正常）。
 - 📌 回滚点：commit 991b8b1（第十一轮拖拽可用版本）。第十二轮起改动尚未提交，确认手感后再提交新检查点。
 
 ## 待办事项

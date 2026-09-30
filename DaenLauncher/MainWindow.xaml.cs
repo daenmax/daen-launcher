@@ -1603,15 +1603,6 @@ public sealed partial class MainWindow : Window
         locationItem.Click += (_, _) => LauncherRunner.OpenContainingFolder(item);
         menu.Items.Add(locationItem);
 
-        // 打开资源管理器菜单（功能暂未开放，保留入口）
-        var shellMenuItem = new MenuFlyoutItem { Text = loc.T("Main.Item.ShellMenu") };
-        shellMenuItem.Click += (_, _) =>
-        {
-            _ = ShowMessageDialog(LocalizationService.Tr("Main.UnderDevelopment"),
-                LocalizationService.Tr("Dialog.Info"));
-        };
-        menu.Items.Add(shellMenuItem);
-
         menu.Items.Add(new MenuFlyoutSeparator());
 
         // 复制完整路径
