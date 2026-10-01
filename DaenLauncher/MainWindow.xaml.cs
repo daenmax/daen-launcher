@@ -391,13 +391,22 @@ public sealed partial class MainWindow : Window
         App.Instance.ShowSettingsWindow();
     }
 
-    /// <summary>底部功能入口占位按钮（待办/随手记/剪贴板，需求-布局3）</summary>
-    /// <summary>打开附属功能（todo = 待办窗口；其余为开发中占位，新功能在注册表里扩展）</summary>
+    /// <summary>打开附属功能（todo = 待办窗口，note = 随手记窗口，clipboard = 剪贴板窗口）</summary>
     private void OpenAuxiliaryFeature(string id)
     {
         if (id == AuxiliaryFeatures.TodoId)
         {
             App.Instance.ShowTodoWindow();
+            return;
+        }
+        if (id == AuxiliaryFeatures.NoteId)
+        {
+            App.Instance.ShowNoteWindow();
+            return;
+        }
+        if (id == AuxiliaryFeatures.ClipboardId)
+        {
+            App.Instance.ShowClipboardWindow();
             return;
         }
         _ = ShowMessageDialog(LocalizationService.Tr("Main.UnderDevelopment"),

@@ -287,12 +287,121 @@ build.bat / clean.bat   双击可用的编译/清理脚本
 - **语言**：zh/en 各 +6 键（Settings.Auxiliary/.Show/.MaxHint/.MaxReached、Main.MoreFeatures，290 键对齐）。
 - **测试**：Debug 0 错误 0 警告；build.bat Release 产物正常。待用户实测。
 
+## 最新变更（2026-09-30 第二十七轮：待办"全部"页不再显示已完成）
+- "全部"标签页过滤条件改为只显示未完成任务（原来会混入已完成的删除线项），已完成的内容只出现在"已完成"页；底部统计的"共 N 项"仍统计全部数据（不变）。
+- **测试**：Debug 0 错误 0 警告；build.bat Release 产物正常。小改动，由用户自测。
+
+## 最新变更（2026-09-30 第二十八轮：图标选择器支持"不选择"）
+- emoji 面板顶部新增"不选择"磁贴（叉号图标 + 文字说明）：点击后 `SelectedIcon=""` 并清除所有高亮，解决"分类/子分类一旦选了表情图标就取不掉"的问题。属于共享缓存面板的一部分，点击走静态路由（ClearTilePressed → 当前可见实例）。空图标在分类/子分类渲染端本来就按"无图标"处理（CreateIconElement 返回 null），无需改动。
+- 语言：IconPicker.None（zh/en 各 +1，291 键对齐）。
+- **测试**：Debug 0 错误 0 警告；build.bat Release 产物正常。小改动，由用户自测。
+
+## 最新变更（2026-09-30 第二十九轮：图标选择器改竖排标签 + "不选择"公用高亮）
+- **用户反馈**：上一轮的"不选择"能用但选中后没有高亮（不知道选没选上）；标签横向排，group_ 多了放不下；"不选择"只在 emoji 页有。
+- **重写 IconPicker 布局**：改为左右两栏——左侧竖向标签栏（可滚动）：**"不选择"固定在最顶部**（叉号图标，公用，与具体标签无关，下面有分隔线）→ 表情图标 → 自定义图标 → 各 group_ 分组；右侧为内容区，点击左侧项切换（选中项浅背景 + 加粗，同待办窗口标签样式）。
+- **"不选择"高亮**：点击后清空 SelectedIcon 并给自己描边高亮；选中任何具体图标时自动取消高亮（ClearSelection 统一处理）；打开弹窗时若当前图标本来就为空也高亮。MarkSelected 拆成 Border/Control 两个重载（FrameworkElement 没有 BorderThickness 属性）。
+- **测试**：Debug 0 错误 0 警告；build.bat Release 产物正常。由用户自测。
+
+## 最新变更（2026-09-30 第三十轮：图标选择器 3 项修复/优化）
+- **"不选择"图标显示方框**：上一轮把叉号字符（\uE711）直接写进了 TextBlock——TextBlock 用默认 UI 字体（Segoe UI），没有符号字形，显示成方框。修复：改用 FontIcon + TextBlock 的横向组合。**教训：符号字体字形必须走 FontIcon（或显式指定符号字体族），不能塞进普通 TextBlock。**
+- **切换标签窗口大小变化**：选择器根 Grid 设固定尺寸（Width=440, Height=264，取自表情图标页的合适大小），ContentDialog 不再随内容自适应跳动；表情页网格 MaxHeight 相应调整为 216 给输入框让位。
+- **自定义 emoji 输入**：表情图标页顶部新增输入框（MaxLength=8，兼容组合 emoji）+"使用"按钮；输入合法 emoji（EmojiCatalog.IsEmoji：非空且不含路径字符）立即生效并高亮输入框；打开弹窗时若当前图标是不在网格里的自定义 emoji，自动回填到输入框。输入框为每实例元素（不进共享缓存面板）。
+- **语言**：IconPicker.EmojiInput/.EmojiUse（zh/en 各 +2，293 键对齐）。
+- **测试**：Debug 0 错误 0 警告；build.bat Release 产物正常。由用户自测。
+
+## 最新变更（2026-09-30 第三十一轮：随手记功能上线）
+- **随手记窗口**（`NoteWindow.xaml/.cs`，单例、关闭=隐藏、默认 720x560 记忆大小）：
+  - 左侧：顶部一行 [云同步][添加笔记（蓝色强调）] + 笔记列表。列表项只显示标题+创建时间（需求：不显示内容摘要），置顶恒在最上、其余按创建时间倒序；卡片可设底色（TodoColors 8 色，alpha=34 叠加）；选中项描边高亮；右键菜单：编辑（改标题+底色的弹窗）/置顶/取消置顶/删除；
+  - 右侧：纯文本编辑器（需求：不支持 markdown），头部显示当前笔记标题+创建时间；内容输入防抖 800ms 保存（本地落盘/云端推送）；
+  - 左右分隔条复用 `SplitterGrid`，拖动记忆 `NoteLeftPaneWidth`；**锁定尺寸时分隔条不可拖**（PointerPressed 里按设置拦截——SplitterGrid 是 Grid 不是 Control，没有 IsEnabled）；
+  - 新窗口联动规则全接入：RefreshTitle / ApplyBackdropEverywhere / ApplyThemeEverywhere / ApplyCaptionButtonColors。
+- **数据**（`Models/NoteModels.cs`）：NoteItem（Id=Guid "N" 格式 32 位十六进制，Title/Text/Color/IsPinned/CreatedAt）+ NoteData；本地存 data\note\notes.json（复用 JsonStore）。
+- **云同步**（`Services/NoteService.cs`，多标签，需求）：
+  - 每条笔记 = webnote 一个条目：标题 `DaenLauncher-Note-{32位Id}`，正文 = 第一行标题 + 换行 + NoteItem JSON；
+  - **保存是整体覆盖 → 每次保存提交全部笔记**（漏提交=删除）；非 DaenLauncher-Note-* 的他人条目在内存保留、保存时原样带回（防止覆盖删除便签里其他内容；结构异常的本应用条目也按他人条目保留不丢数据）；
+  - token 规则与待办一致（写操作前【获取】对比、保存后换新 token、获取失败禁写）；
+  - 本地/云端两套数据完全独立（与待办同款架构，随时切换）。
+- **设置-随手记页**（NotePage，与 TodoPage 同款）：云同步开关 + 便签名称/密码（小眼睛）+ 保存（警示框→接口验证→落盘）；**便签名称查重（需求）：与待办的便签名称相同则拒绝并提示——TodoPage 保存时也加了反向查重**；教程卡片（启用时显示）；显示和隐藏快捷键（默认 Alt+3，热键 id=3）；永远置顶/锁定尺寸/显示位置（支持上次位置，NoteLastWindowX/Y）。
+- **接线**：App 新增 ShowNoteWindow/ToggleNoteWindow/ApplyNoteWindowBehavior/OnNoteSyncSettingsChanged/RefreshNoteWindowView；注册/分发热键 id=3（NoteHotkeyPressed）；附属功能注册表 NoteId，主窗口左下角"随手记"按钮打开随手记窗口；数据删除勾选 note 后 LoadLocal+刷新窗口；主题/材质/标题联动全部接入。
+- **编译坑**：Grid.Children[i] 返回 UIElement，Grid.SetColumn 需要 FrameworkElement（先存 var）；Grid/Panel 没有 IsEnabled（那是 Control 的）。
+- **语言**：zh/en 各 +37 键（Settings.NoteSync.*/NoteTrigger/NoteAlwaysOnTop/NoteLockSize/NoteShowPosition、Note.* 窗口键，330 键对齐）。
+- **测试**：Debug 0 错误 0 警告；build.bat Release 产物正常。云同步/窗口交互待用户实测。
+
+## 最新变更（2026-09-30 第三十二轮：webnote 便签自动创建 + 随手记交互修复）
+- **webnote 便签自动创建（需求-优化1）**：WebNoteClient 新增 `FetchOrCreateAsync`——【获取】返回"剪贴板不存在"（status=2）时，自动调一次【保存】（note_id/note_token 传空，内容为 `[{"title":"新便签","content":""}]`）创建便签，然后重新【获取】。TodoService/NoteService 的所有获取点（窗口打开/刷新/写操作前）和两个设置页的保存验证都改走该方法——**用户不再需要提前去网页创建便签**。据此删除了待办/随手记设置页的"使用教程"卡片（相关方法、字段、显隐逻辑全部移除，语言键保留未删）。
+- **随手记"功能没做"的真相（需求-优化2 的排查结论）**：排序/底色/置顶/右键菜单其实都已实现，用户看不到是因为三个叠加问题——
+  1. **云同步便签不存在时所有写操作被禁用**（优化1已修复根因）；
+  2. **右键菜单弹不出来（实锤 bug）**：右键也会触发 PointerPressed → SelectNote → RebuildNoteList 重建列表，被右键的卡片在 ContextFlyout 弹出前就被替换掉了。修复：PointerPressed 只响应左键（`IsLeftButtonPressed` 判断）；
+  3. **分隔条没有左右箭头光标**（实锤 bug）：NoteWindow 构造时漏了 PointerEntered/Exited → SetSplitterCursor（主窗口有，随手记漏抄）。已补。
+- **教训**：① ContextFlyout 与列表重建的时序——凡是"按下即重建列表"的交互，必须区分左右键；② 复用主窗口模式（分隔条光标）时要核对每一个配套事件是否都带过来了。
+- **测试**：Debug 0 错误 0 警告；build.bat Release 产物正常。待用户实测（重点：不提前建便签直接启用云同步、随手记右键菜单、分隔条光标与拖动）。
+
+## 最新变更（2026-09-30 第三十三轮：随手记新建弹窗 + 快捷键修复）
+- **新建笔记支持先填标题和底色（需求）**：点"添加笔记"先弹出与编辑同款的弹窗（标题+底色，抽成 `BuildNoteEditContent` 供新增/编辑共用），确认后创建并选中、光标进编辑器。
+- **随手记快捷键 Alt+3 无效（实锤）**：第三十一轮接线时**漏了 `Win32Helper.NoteHotkeyPressed += ToggleNoteWindow` 订阅**——热键注册了（id=3 也注册上了）但事件没人响应。已补。**教训：加新热键要"注册+分发+订阅"三件套核对，之前 TodoHotkey 是在第二轮逐步补齐的所以没暴露这个模式。**
+- **测试**：Debug 0 错误 0 警告；build.bat Release 产物正常。由用户实测。
+
+## 最新变更（2026-09-30 第三十四轮：随手记编辑面板化——不弹窗编辑）
+- **需求变更**：新建笔记不弹编辑弹窗，标题/正文/底色/置顶全部在右侧编辑面板里直接填；右键菜单去掉"编辑"，只留置顶（取消置顶）和删除。
+- **右侧编辑面板重构**：头部 = 标题输入框 + 置顶按钮（图钉图标随状态切换 E841/E77A）+ 底色色块行（无颜色+8色，点击即改并同步列表卡片底色）+ 创建时间；下方正文编辑框。所有字段变化走同一个 800ms 防抖保存（SaveTextNow 同时保存标题和正文）；底色/置顶点击立即生效。
+- 新增 `ClearEditor()`/`SetEditorEnabled()`/`UpdateEditorControls()` 统一管理编辑面板状态（之前散落在 4 处的内联清空代码全部收敛）；删除 BuildNoteEditContent/EditNoteAsync/双击编辑。
+- **再次踩坑记录**：StackPanel/Grid 没有 IsEnabled（Control 才有）——上一轮刚记过 Grid.SetColumn 的坑，同族问题，以后凡"容器整体禁用"都要逐个设置子控件或包一个 ContentControl。
+- **测试**：Debug 0 错误 0 警告；build.bat Release 产物正常。由用户实测。
+
+## 最新变更（2026-10-01 第三十五轮：随手记手动保存 + webnote 临时错误重试）
+- **"数据格式错误"排查结论（实测 API 确认）**：用 daena1 实测——① 我们的 note_content 格式（含自动创建的 `[{"title":"新便签","content":""}]` 和随手记多标签条目）服务端**全部接受**，甚至双重编码的内容服务端也照存不误；② **Accept-Language 头缺失时服务端会返回"服务器负载过高，业务处理失败"**（用户提示后确认，之前 curl 诊断全被这个误导）；③ "数据格式错误"与"负载过高"一样是**服务端临时性错误**，不是我们的编码问题。修复：WebNoteClient.FetchOrCreateAsync 与两个 Service 的保存都加了**临时错误自动重试一次**（等待 1.5 秒后重新获取 token 再试；只重试 NetworkError 类，名称/密码错误不重试）。
+- **随手记改为手动保存（需求-优化2）**：右侧编辑面板头部新增"保存"按钮（蓝色强调样式，无修改时置灰）——新增/修改/删除/置顶/底色只改内存并亮起按钮，**点保存才落盘/推送**（本地 Persist / 云端 PushToCloud），彻底避免高频请求被 webnote 封禁。标题/正文输入仍是 800ms 防抖并入内存（RebuildNoteList 让列表实时反映）。窗口关闭时：本地模式立即落盘；云模式尽力后台推送一次（防丢改动）。云端拉取成功后清除 dirty 标记。
+- **遗留坑记录**：webnote 服务端极不稳定（负载过高/数据格式错误等临时错误频发），未来若再遇"偶发同步失败"先怀疑服务端，重试是正确姿势；诊断时请求头必须带全（尤其 Accept-Language）。
+- **测试**：Debug 0 错误 0 警告；build.bat Release 产物正常。已把测试便签 daena1 恢复为干净内容。待用户实测。
+
+## 最新变更（2026-10-01 第三十六轮：webnote HTTP 全量调试日志（临时））
+- **需求**：换新便签名仍报"数据格式错误"，用户要求加 HTTP 日志自行分析，修复后删除。
+- **临时日志功能**（WebNoteClient.DebugLog，**修复后整体删除**）：每次【获取】/【保存】都把 请求 URL、请求头摘要、完整请求体（保存接口是 URL 编码后的原始报文，获取接口是 multipart 字段）、响应状态码、完整响应体 追加写入 `data\webnote_debug.log`；网络异常也记录 ex.ToString()。日志含账号密码，仅本机排查用。
+- **日志位置**：exe 同级 `data\webnote_debug.log`（exe 目录不可写时在设置-数据-打开配置文件目录里看真实位置）。
+- **测试**：Debug 0 错误 0 警告；build.bat Release 产物正常。等用户抓到失败请求的日志再分析。
+
+## 最新变更（2026-10-01 第三十七轮：修复"数据格式错误"——本地无数据时不调用保存接口）
+- **用户通过日志定位根因**：自动创建便签成功后，本地（云端内存）没有任何数据，SyncFromCloudAsync 仍调了一次保存接口，提交的 note_content 是 `[]`（URL 编码 %5B%5D），服务端直接拒绝并报"数据格式错误"。
+- **修复**：① NoteService.SyncFromCloudAsync 云端无本应用笔记时**跳过保存**（CloudAvailable 直接置 true）；② TodoService.SyncFromCloudAsync 同样按"无数据不保存"处理；③ 连带防御：随手记把笔记全部删除后点保存，为避免再提交空数组，用创建时的占位条目（新便签）代替空数组——云端效果等价于"没有我们的笔记"。
+- **日志功能保留**：等用户确认修复后再删除（第三十六轮加的 webnote_debug.log）。
+- **测试**：Debug 0 错误 0 警告；build.bat Release 产物正常。由用户实测验证。
+
+## 最新变更（2026-10-01 第三十八轮：删除 webnote 调试日志功能）
+- 用户确认"数据格式错误"修复没问题，按约定删除第三十六轮加的临时 HTTP 日志：WebNoteClient 里的 DebugLog/DebugLogException 方法及全部调用点移除，代码恢复原样；磁盘上残留的 webnote_debug.log（在 build - 副本\data 下发现一个，含账号密码）已删除。
+- **测试**：Debug 0 错误 0 警告；build.bat Release 产物正常。
+
 ## 关键决策（待办云同步）与已知限制
 - **便签密码明文存 settings.json**（本机文件，与桌面便签场景风险可接受；如需加密另做）。
 - **推送失败的处理**：写操作先改内存再推云端（云端模式不落本地）；若推送失败，云端数据未更新，**下次窗口打开会重新从云端拉取**，未推送的修改会丢（云为唯一事实源的模型，需求如此设计）。
 - **云/本地是两套独立数据**（第二十四轮）：云同步模式不写本地文件，本地模式不碰云端，随时切换互不影响。
 - **token 冲突不合并内容**：需求只要求"发现不一致就用最新 token 保存"（以本机数据覆盖），未做内容级合并。
 - CalendarDatePicker.FirstDayOfWeek 的类型是 `Windows.Globalization.DayOfWeek`（不是 Microsoft.UI.Xaml 的）。
+
+## 最新变更（2026-10-01 第三十九轮：剪贴板功能上线 + 2 项调整）
+
+- **剪贴板窗口**（`ClipboardWindow.xaml/.cs`，单例、关闭=隐藏、默认 480x640 记忆大小）：
+  - 分类栏：记录 / 归档（同待办窗口标签样式，选中浅背景+加粗）；归档 = 持久化存储，不受数量限制（需求）；
+  - 列表一行一条、最新在最上；点击行 = **再次复制到剪贴板**，成功后**行高亮渐隐**反馈（见下）；
+  - 右键菜单：复制 / 修改（仅文本，弹 ContentDialog 多行编辑框）/ 归档（或取消归档）/ 删除；
+  - 底部按钮随分类切换：记录 → "清除全部记录"，归档 → "清除全部归档"（均有二次确认弹窗）；左侧统计"共 N 条记录/归档"；
+  - **非文本支持**（需求评估后实现）：图片条目显示缩略图预览（DecodePixelHeight=192 限内存）+ 像素尺寸，再次复制用 SetBitmap；文件/文件夹条目显示首项名称 + "共 N 项"，再次复制用 SetStorageItems（已不存在的路径自动跳过）；
+  - 未启用功能时窗口顶部显示 Warning InfoBar 引导去设置开启（监听已停，查看/再次复制仍可用）。
+- **监听实现**（`Services/ClipboardService.cs`）：**DispatcherTimer 每 800ms 轮询 `GetClipboardSequenceNumber`**（新增 P/Invoke）——比 `Clipboard.ContentChanged` 事件可靠（事件在窗口焦点切换时才可能触发）；捕获优先级 文本 > 图片 > 文件（同一内容带多格式取一种）。
+  - 去重：与最新一条相同（文本全等 / 图片像素 SHA1 指纹 / 文件路径列表相同）不重复记录；
+  - 图片落盘 `data\clipboard\images\{id}.png`：BitmapDecoder 解码像素 → BitmapEncoder 重编码 PNG（不依赖剪贴板源格式）；
+  - **"再次复制"防自记录**：写剪贴板前设 `_suppressNextCapture`，下一次轮询跳过；`Clipboard.Flush()` 让系统接管内容（应用退出后仍可粘贴）；
+  - 数量裁剪：超出"最大保存数量"从最旧端删，图片文件一并删除（ImagePath 限定在 images 目录内防路径注入）；文本超 100 万字符不记录；
+  - 存储 `data\clipboard\clipboard.json`（复用 JsonStore）；数据删除页勾选 clipboard 后 `LoadLocal()` + 刷新窗口。
+- **设置-剪贴板页**（ClipboardPage，替换占位页）：启用本功能（默认**关**，隐私考虑，开启即开始监听）、最大保存记录数量（NumberBox 10-1000，默认 60，调小立即裁剪）、显示和隐藏快捷键（默认 Alt+4，热键 id=4）、锁定尺寸、显示位置（支持上次位置 ClipboardLastWindowX/Y + 尺寸记忆 ClipboardWindowWidth/Height）。
+- **接线**：App 新增 ShowClipboardWindow/ToggleClipboardWindow/ApplyClipboardWindowBehavior/RefreshClipboardWindowView，主题/材质/标题三项联动全部接入；热键 id=4（`Win32Helper.HotkeyIdClipboard` + `ClipboardHotkeyPressed`，**注册+分发+订阅三件套齐全**）；MainWindow 附属功能栏 clipboard 分支（AuxiliaryFeatures.ClipboardId 常量）；SettingsWindow 导航 Clipboard => ClipboardPage。
+- **语言**：zh/en 各 +31 键（Settings.Clipboard* 5 卡片 + Clipboard.* 窗口键，362 键两边对齐 0 缺失）。
+- **新编译坑（第三十九轮）**：① `ClipboardContent` 类型不存在——`Clipboard.GetContent()` 返回的是 **`DataPackageView`**；② NumberBox 上下限属性是 **Minimum/Maximum**（不是 Min/Max）；③ `AppWindow` 没有 Width/Height，尺寸在 **`AppWindow.Size`**；④ `Image` 没有 CornerRadius 属性，圆角要包 Border（但 Border 圆角不裁剪子内容，仅背景圆角）。
+- **测试**：Debug 0 错误 0 警告；build.bat Release 单文件产物正常。待用户实测（重点：复制文本/截图/文件的记录与再次复制、行高亮渐隐、归档往返、数量裁剪、Alt+4 热键）。
+
+## 最新变更（2026-10-01 第四十轮：剪贴板 2 项调整）
+- **复制成功提示改版（需求：用户嫌蒙版丑，给了 4 方案由用户选定"行高亮渐隐"）**：从"整行强调色蒙版 + 已复制文字"改为**行高亮渐隐**——点击复制成功后整行背景泛一下系统强调色浅色（alpha=90），约 0.9 秒 ColorAnimation 渐隐回原底色，不遮挡内容。实现要点：Storyboard 的 ColorAnimation 作用在**独立画刷实例**上（共享 ThemeResource 画刷不能直接改，会影响所有行）；动画 Completed 后把行背景还原为主题画刷（深浅色主题切换仍跟随）。
+- **修改弹窗多行显示修复**：原 TextBox 只设 MinHeight，ContentDialog 把内容压矮且无滚动条 → 多行内容只露第一行。改为固定 Height=260 + VerticalScrollBarVisibility=Auto + 显式设置 AcceptsReturn（构造后单独赋值），纵向滚动条为需求要求。
+- **测试**：Debug 0 错误 0 警告。由用户实测（多行文本修改、行高亮渐隐效果）。
 
 ## 当前进度
 - ✅ 需求1.md 主体 + 十八轮改进/修复全部完成；**"资源管理器菜单"需求已在第十九轮彻底移除（用户决定放弃）**。
@@ -303,12 +412,16 @@ build.bat / clean.bat   双击可用的编译/清理脚本
 - ✅ 第二十四轮：云/本地数据彻底分离（随时切换互不影响）+ 重要底色改为设置里自选。
 - ✅ 第二十五轮：待办"上次位置"修复（位置记录 + 恢复）。
 - ✅ 第二十六轮：附属功能栏可配置（勾选最多3个 + 排序 + "⋯"更多菜单）。
-- ⚠️ 待用户实测：第十二轮（覆盖 70% 触发重排 + 滑动动画）、**第二十~二十六轮（待办窗口全部交互、云同步、待办快捷键 Alt+2、启动器选中风格标签、附属功能栏配置）**。
+- ✅ 第二十八~三十轮：图标选择器（"不选择"公用+高亮、竖排标签、固定尺寸、自定义 emoji 输入）。
+- ✅ 第三十一轮：随手记功能上线（窗口 + 多标签云同步 + 设置页 + 便签名查重 + 热键 Alt+3）。
+- ✅ 第三十八轮：剪贴板功能上线（监听记录 + 窗口 + 再次复制 + 图片/文件支持 + 归档 + 设置页 + 热键 Alt+4）。
+- ✅ 第四十轮：复制提示改"行高亮渐隐"（用户选定）+ 修改弹窗多行显示修复。
+- ⚠️ 待用户实测：第十二轮（覆盖 70% 触发重排 + 滑动动画）、**第二十~三十一轮（待办/随手记全部交互、云同步、附属功能栏配置、图标选择器）**、**第三十八轮（剪贴板全部交互）**。
 - 📌 回滚点：commit 991b8b1（第十一轮拖拽可用版本）。第十二轮起改动尚未提交，确认手感后再提交新检查点。
 
 ## 待办事项
 - 用户实测后修 bug。
-- 随手记/剪贴板功能（下轮需求）。
+- 剪贴板云同步（如需要，下轮需求；当前剪贴板仅本地存储）。
 - "左键双击桌面"、"双击任务栏"触发（预留复选框，需窗口层级判断）。
 - 关于页"应用更新"检查/自动更新。
 

@@ -79,6 +79,10 @@ public static class Win32Helper
     [DllImport("user32.dll")]
     public static extern uint GetDpiForWindow(IntPtr hwnd);
 
+    /// <summary>剪贴板序列号：剪贴板内容每次变化都 +1（剪贴板监听轮询用）</summary>
+    [DllImport("user32.dll")]
+    public static extern uint GetClipboardSequenceNumber();
+
     #endregion
 
     public delegate IntPtr SUBCLASSPROC(IntPtr hWnd, uint uMsg, nint wParam, nint lParam,
@@ -106,11 +110,23 @@ public static class Win32Helper
     /// <summary>热键回调：待办窗口热键（id=2）触发</summary>
     public static event Action? TodoHotkeyPressed;
 
+    /// <summary>热键回调：随手记窗口热键（id=3）触发</summary>
+    public static event Action? NoteHotkeyPressed;
+
+    /// <summary>热键回调：剪贴板窗口热键（id=4）触发</summary>
+    public static event Action? ClipboardHotkeyPressed;
+
     /// <summary>热键 id：主窗口 显示/隐藏</summary>
     public const int HotkeyIdMain = 1;
 
     /// <summary>热键 id：待办窗口 显示/隐藏</summary>
     public const int HotkeyIdTodo = 2;
+
+    /// <summary>热键 id：随手记窗口 显示/隐藏</summary>
+    public const int HotkeyIdNote = 3;
+
+    /// <summary>热键 id：剪贴板窗口 显示/隐藏</summary>
+    public const int HotkeyIdClipboard = 4;
 
     private static readonly Dictionary<long, SUBCLASSPROC> SubclassProcs = new();
     private static long _nextSubclassId = 1;
@@ -168,13 +184,20 @@ public static class Win32Helper
     {
         if (uMsg == WM_HOTKEY)
         {
-            if (wParam.ToInt64() == HotkeyIdTodo)
+            switch (wParam.ToInt64())
             {
-                TodoHotkeyPressed?.Invoke();
-            }
-            else
-            {
-                HotkeyPressed?.Invoke();
+                case HotkeyIdTodo:
+                    TodoHotkeyPressed?.Invoke();
+                    break;
+                case HotkeyIdNote:
+                    NoteHotkeyPressed?.Invoke();
+                    break;
+                case HotkeyIdClipboard:
+                    ClipboardHotkeyPressed?.Invoke();
+                    break;
+                default:
+                    HotkeyPressed?.Invoke();
+                    break;
             }
             return true;
         }

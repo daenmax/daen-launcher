@@ -37,6 +37,8 @@ public partial class App : Application
     private MainWindow? _mainWindow;
     private SettingsWindow? _settingsWindow;
     private TodoWindow? _todoWindow;
+    private NoteWindow? _noteWindow;
+    private ClipboardWindow? _clipboardWindow;
 
     public App()
     {
@@ -133,6 +135,10 @@ public partial class App : Application
 
         // ===== 待办：从磁盘加载本地数据（云同步开启时窗口打开后以云端为准） =====
         TodoService.Instance.LoadLocal();
+        NoteService.Instance.LoadLocal();
+
+        // ===== 剪贴板：加载本地数据并按设置开始/停止监听系统剪贴板 =====
+        ClipboardService.Instance.Initialize();
 
         // ===== 项目完整性检测（仅在软件启动时执行一次，失效项目显示"项目无法找到"图标，需求-优化1）=====
         LauncherDataService.Instance.CheckMissingItems();
@@ -207,6 +213,80 @@ public partial class App : Application
         _todoWindow.ToggleViaHotkey();
     }
 
+    /// <summary>打开随手记窗口（单例）</summary>
+    public void ShowNoteWindow()
+    {
+        if (_noteWindow == null)
+        {
+            _noteWindow = new NoteWindow();
+            _noteWindow.Closed += (_, _) => _noteWindow = null;
+        }
+        _noteWindow.ActivateAndBringToFront();
+    }
+
+    /// <summary>显示/隐藏随手记窗口切换（随手记快捷键，默认 Alt+3）</summary>
+    public void ToggleNoteWindow()
+    {
+        if (_noteWindow == null)
+        {
+            ShowNoteWindow();
+            return;
+        }
+        _noteWindow.ToggleViaHotkey();
+    }
+
+    /// <summary>只应用随手记窗口行为设置（置顶/锁定尺寸变化时调用）</summary>
+    public void ApplyNoteWindowBehavior()
+    {
+        _noteWindow?.ApplyBehaviorSettings();
+    }
+
+    /// <summary>云同步设置变化（设置页保存/关闭随手记云同步）时通知随手记窗口立即响应</summary>
+    public void OnNoteSyncSettingsChanged()
+    {
+        _noteWindow?.OnSyncSettingsChanged();
+    }
+
+    /// <summary>外部变化（删除/导入 note 数据、底色设置等）后刷新随手记窗口</summary>
+    public void RefreshNoteWindowView()
+    {
+        _noteWindow?.RefreshView();
+    }
+
+    /// <summary>打开剪贴板窗口（单例）</summary>
+    public void ShowClipboardWindow()
+    {
+        if (_clipboardWindow == null)
+        {
+            _clipboardWindow = new ClipboardWindow();
+            _clipboardWindow.Closed += (_, _) => _clipboardWindow = null;
+        }
+        _clipboardWindow.ActivateAndBringToFront();
+    }
+
+    /// <summary>显示/隐藏剪贴板窗口切换（剪贴板快捷键，默认 Alt+4）</summary>
+    public void ToggleClipboardWindow()
+    {
+        if (_clipboardWindow == null)
+        {
+            ShowClipboardWindow();
+            return;
+        }
+        _clipboardWindow.ToggleViaHotkey();
+    }
+
+    /// <summary>只应用剪贴板窗口行为设置（锁定尺寸变化时调用）</summary>
+    public void ApplyClipboardWindowBehavior()
+    {
+        _clipboardWindow?.ApplyBehaviorSettings();
+    }
+
+    /// <summary>外部变化（数据删除等）后刷新剪贴板窗口</summary>
+    public void RefreshClipboardWindowView()
+    {
+        _clipboardWindow?.RefreshView();
+    }
+
     #endregion
 
     #region 热键
@@ -226,6 +306,8 @@ public partial class App : Application
         _hotkeyWindow.MessageReceived += (msg, wParam, _) => Win32Helper.HandleHotkeyMessage(msg, wParam);
         Win32Helper.HotkeyPressed += ToggleMainWindow;
         Win32Helper.TodoHotkeyPressed += ToggleTodoWindow;
+        Win32Helper.NoteHotkeyPressed += ToggleNoteWindow;
+        Win32Helper.ClipboardHotkeyPressed += ToggleClipboardWindow;
         RegisterHotkey();
     }
 
@@ -251,6 +333,24 @@ public partial class App : Application
             Win32Helper.RegisterHotKeyId(_hotkeyWindow.Handle, Win32Helper.HotkeyIdTodo,
                 (uint)(settings.TodoHotkeyModifiers | Win32Helper.MOD_NOREPEAT),
                 (uint)settings.TodoHotkeyVirtualKey);
+        }
+
+        // 随手记窗口热键（id=3）
+        Win32Helper.UnregisterHotKeyId(_hotkeyWindow.Handle, Win32Helper.HotkeyIdNote);
+        if (settings.NoteTriggerHotkey)
+        {
+            Win32Helper.RegisterHotKeyId(_hotkeyWindow.Handle, Win32Helper.HotkeyIdNote,
+                (uint)(settings.NoteHotkeyModifiers | Win32Helper.MOD_NOREPEAT),
+                (uint)settings.NoteHotkeyVirtualKey);
+        }
+
+        // 剪贴板窗口热键（id=4）
+        Win32Helper.UnregisterHotKeyId(_hotkeyWindow.Handle, Win32Helper.HotkeyIdClipboard);
+        if (settings.ClipboardTriggerHotkey)
+        {
+            Win32Helper.RegisterHotKeyId(_hotkeyWindow.Handle, Win32Helper.HotkeyIdClipboard,
+                (uint)(settings.ClipboardHotkeyModifiers | Win32Helper.MOD_NOREPEAT),
+                (uint)settings.ClipboardHotkeyVirtualKey);
         }
     }
 
@@ -278,6 +378,8 @@ public partial class App : Application
         try { _mainWindow?.Close(); } catch { /* 忽略 */ }
         try { _settingsWindow?.Close(); } catch { /* 忽略 */ }
         try { _todoWindow?.Close(); } catch { /* 忽略 */ }
+        try { _noteWindow?.Close(); } catch { /* 忽略 */ }
+        try { _clipboardWindow?.Close(); } catch { /* 忽略 */ }
 
         _singleInstanceMutex?.ReleaseMutex();
         Current.Exit();
@@ -308,6 +410,16 @@ public partial class App : Application
         {
             ThemeService.Apply((FrameworkElement)_todoWindow.Content, mode);
             ThemeService.ApplyCaptionButtonColors(_todoWindow.AppWindow, (FrameworkElement)_todoWindow.Content);
+        }
+        if (_noteWindow != null)
+        {
+            ThemeService.Apply((FrameworkElement)_noteWindow.Content, mode);
+            ThemeService.ApplyCaptionButtonColors(_noteWindow.AppWindow, (FrameworkElement)_noteWindow.Content);
+        }
+        if (_clipboardWindow != null)
+        {
+            ThemeService.Apply((FrameworkElement)_clipboardWindow.Content, mode);
+            ThemeService.ApplyCaptionButtonColors(_clipboardWindow.AppWindow, (FrameworkElement)_clipboardWindow.Content);
         }
     }
 
@@ -367,6 +479,14 @@ public partial class App : Application
         {
             BackdropService.Apply(_todoWindow, backdrop);
         }
+        if (_noteWindow != null)
+        {
+            BackdropService.Apply(_noteWindow, backdrop);
+        }
+        if (_clipboardWindow != null)
+        {
+            BackdropService.Apply(_clipboardWindow, backdrop);
+        }
     }
 
     /// <summary>只刷新主窗口标题（自定义标题变化时调用）</summary>
@@ -381,6 +501,8 @@ public partial class App : Application
         _mainWindow?.RefreshTitle();
         _settingsWindow?.RefreshTitle();
         _todoWindow?.RefreshTitle();
+        _noteWindow?.RefreshTitle();
+        _clipboardWindow?.RefreshTitle();
         _trayService?.RefreshTooltip();
     }
 

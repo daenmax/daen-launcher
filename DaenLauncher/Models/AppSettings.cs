@@ -198,6 +198,54 @@ public sealed class AppSettings
     /// <summary>子分类 Tab 的视觉风格（仅 Tab 风格下有效，默认选中风格）</summary>
     public SubCategoryTabVisualStyle SubCategoryTabVisual { get; set; } = SubCategoryTabVisualStyle.Highlight;
 
+    // ===== 随手记 =====
+
+    /// <summary>随手记是否启用云同步（webnote 便签；false = 数据仅存本地 data\note）。
+    /// 注意：便签名称不能和待办的相同（设置页有查重）。</summary>
+    public bool NoteCloudSyncEnabled { get; set; } = false;
+
+    /// <summary>随手记云同步便签名称（不能和待办的相同，需求）</summary>
+    public string NoteSyncName { get; set; } = "";
+
+    /// <summary>随手记云同步便签密码（明文存于本机 settings.json）</summary>
+    public string NoteSyncPwd { get; set; } = "";
+
+    /// <summary>随手记：使用快捷键 显示/隐藏随手记窗口（默认 Alt+3）</summary>
+    public bool NoteTriggerHotkey { get; set; } = false;
+
+    /// <summary>随手记快捷键的修饰键（Win32 MOD_* 组合值）</summary>
+    public int NoteHotkeyModifiers { get; set; } = 0x0001; // MOD_ALT
+
+    /// <summary>随手记快捷键的虚拟键码（Win32 VK_*，默认 '3'）</summary>
+    public int NoteHotkeyVirtualKey { get; set; } = 0x33;
+
+    /// <summary>随手记快捷键显示文本（仅界面回显，默认 Alt+3）</summary>
+    public string NoteHotkeyText { get; set; } = "Alt+3";
+
+    /// <summary>随手记：永远置顶</summary>
+    public bool NoteAlwaysOnTop { get; set; } = true;
+
+    /// <summary>随手记：锁定尺寸（窗口不可调整大小，左右分隔条不可拖动）</summary>
+    public bool NoteLockSize { get; set; } = false;
+
+    /// <summary>随手记：窗口显示位置（上次位置用 NoteLastWindowX/Y）</summary>
+    public ShowPosition NoteShowPosition { get; set; } = ShowPosition.Center;
+
+    /// <summary>随手记窗口宽度（逻辑像素）</summary>
+    public double NoteWindowWidth { get; set; } = 720;
+
+    /// <summary>随手记窗口高度（逻辑像素）</summary>
+    public double NoteWindowHeight { get; set; } = 560;
+
+    /// <summary>随手记左侧笔记列表宽度（逻辑像素，分隔条拖动后记忆）</summary>
+    public double NoteLeftPaneWidth { get; set; } = 230;
+
+    /// <summary>随手记窗口上次位置 X（物理像素，-1 = 还没记录过）</summary>
+    public int NoteLastWindowX { get; set; } = -1;
+
+    /// <summary>随手记窗口上次位置 Y（物理像素，-1 = 还没记录过）</summary>
+    public int NoteLastWindowY { get; set; } = -1;
+
     /// <summary>上次窗口位置 X（物理像素，-1 = 还没记录过）</summary>
     public int LastWindowX { get; set; } = -1;
 
@@ -209,4 +257,42 @@ public sealed class AppSettings
 
     /// <summary>待办窗口上次位置 Y（物理像素，-1 = 还没记录过）</summary>
     public int TodoLastWindowY { get; set; } = -1;
+
+    // ===== 剪贴板 =====
+
+    /// <summary>是否启用剪贴板功能（启用后开始监听系统剪贴板并记录，需求）</summary>
+    public bool ClipboardEnabled { get; set; } = false;
+
+    /// <summary>最大保存记录数量（超出后删除最早记录，仅针对记录，不针对归档，需求）</summary>
+    public int ClipboardMaxRecords { get; set; } = 60;
+
+    /// <summary>剪贴板：使用快捷键 显示/隐藏窗口（默认 Alt+4）</summary>
+    public bool ClipboardTriggerHotkey { get; set; } = false;
+
+    /// <summary>剪贴板快捷键的修饰键（Win32 MOD_* 组合值）</summary>
+    public int ClipboardHotkeyModifiers { get; set; } = 0x0001; // MOD_ALT
+
+    /// <summary>剪贴板快捷键的虚拟键码（Win32 VK_*，默认 '4'）</summary>
+    public int ClipboardHotkeyVirtualKey { get; set; } = 0x34;
+
+    /// <summary>剪贴板快捷键显示文本（仅界面回显，默认 Alt+4）</summary>
+    public string ClipboardHotkeyText { get; set; } = "Alt+4";
+
+    /// <summary>剪贴板：锁定尺寸（窗口不可调整大小）</summary>
+    public bool ClipboardLockSize { get; set; } = false;
+
+    /// <summary>剪贴板：窗口显示位置（上次位置用 ClipboardLastWindowX/Y）</summary>
+    public ShowPosition ClipboardShowPosition { get; set; } = ShowPosition.Center;
+
+    /// <summary>剪贴板窗口宽度（逻辑像素）</summary>
+    public double ClipboardWindowWidth { get; set; } = 480;
+
+    /// <summary>剪贴板窗口高度（逻辑像素）</summary>
+    public double ClipboardWindowHeight { get; set; } = 640;
+
+    /// <summary>剪贴板窗口上次位置 X（物理像素，-1 = 还没记录过）</summary>
+    public int ClipboardLastWindowX { get; set; } = -1;
+
+    /// <summary>剪贴板窗口上次位置 Y（物理像素，-1 = 还没记录过）</summary>
+    public int ClipboardLastWindowY { get; set; } = -1;
 }

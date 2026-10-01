@@ -622,6 +622,20 @@ public sealed class DataPage : SettingsPageBase
                 App.Instance.RefreshTodoWindowView();
             }
 
+            // 随手记数据：同上（notes.json 被删后避免内存缓存写回）
+            if (selected.Contains("note"))
+            {
+                NoteService.Instance.LoadLocal();
+                App.Instance.RefreshNoteWindowView();
+            }
+
+            // 剪贴板数据：同上（clipboard.json 被删后避免内存缓存写回）
+            if (selected.Contains("clipboard"))
+            {
+                ClipboardService.Instance.LoadLocal();
+                App.Instance.RefreshClipboardWindowView();
+            }
+
             await ShowInfo(loc.T("Data.Delete.Done"));
 
             // 软件配置（设置/语言）在内存里有缓存，立即生效需要重启
@@ -1296,17 +1310,12 @@ public sealed class TodoPage : SettingsPageBase
     private readonly PasswordBox _notePwdBox = new() { MinWidth = 220 };
     private readonly Button _saveButton = new() { MinWidth = 100 };
 
-    /// <summary>教程卡片（只在云同步下拉选"启用"时显示）</summary>
-    private Border? _tutorialCard;
-
     /// <summary>重要底色色块按钮（标记 -> 按钮），用于更新选中态</summary>
     private readonly List<(string Marker, Button Button)> _importantColorButtons = new();
 
     public TodoPage()
     {
         BuildSyncCard();
-        // 教程卡片紧跟在云同步卡片下方（需求）
-        BuildTutorialCard();
         BuildImportantColorCard();
         BuildTriggerCard();
         BuildAlwaysOnTopCard();
@@ -1610,11 +1619,6 @@ public sealed class TodoPage : SettingsPageBase
                 SettingsService.Instance.Save();
             }
             fields.Visibility = enable ? Visibility.Visible : Visibility.Collapsed;
-            // 教程卡片只针对云同步：下拉选"启用"才显示（需求）
-            if (_tutorialCard != null)
-            {
-                _tutorialCard.Visibility = enable ? Visibility.Visible : Visibility.Collapsed;
-            }
             // 让已打开的待办窗口立即响应（隐藏/显示同步按钮、停止报错条）
             App.Instance.OnTodoSyncSettingsChanged();
         };
@@ -1628,6 +1632,14 @@ public sealed class TodoPage : SettingsPageBase
     /// <summary>名称和密码都非空才能保存（需求）</summary>
     private bool IsSaveInputValid() =>
         !string.IsNullOrWhiteSpace(_noteNameBox.Text) && !string.IsNullOrWhiteSpace(_notePwdBox.Password);
+
+    /// <summary>待办便签名称是否和随手记的重复（需求：两者不能相同）</summary>
+    private bool IsDuplicateWithNoteSync(string name)
+    {
+        var noteName = SettingsService.Instance.Settings.NoteSyncName;
+        return !string.IsNullOrEmpty(noteName) &&
+               string.Equals(name, noteName, StringComparison.OrdinalIgnoreCase);
+    }
 
     /// <summary>保存云同步配置：先弹警示框，确认后调【获取】接口验证名称/密码，成功才落盘（需求）</summary>
     private async Task SaveSyncConfigAsync()
@@ -1646,9 +1658,16 @@ public sealed class TodoPage : SettingsPageBase
         };
         if (await warning.ShowAsync() != ContentDialogResult.Primary) return;
 
+        // 便签名称查重（需求：随手记与待办不能共用同一个便签，否则互相覆盖数据）
+        if (IsDuplicateWithNoteSync(_noteNameBox.Text.Trim()))
+        {
+            await ShowInfo(loc.T("Settings.NoteSync.NameDuplicate"));
+            return;
+        }
+
         // 调【获取】接口验证：成功才允许保存（需求）
         _saveButton.IsEnabled = false;
-        var fetch = await WebNoteClient.FetchInfoAsync(_noteNameBox.Text.Trim(), _notePwdBox.Password);
+        var fetch = await WebNoteClient.FetchOrCreateAsync(_noteNameBox.Text.Trim(), _notePwdBox.Password);
         _saveButton.IsEnabled = true;
 
         if (!fetch.Success)
@@ -1670,36 +1689,6 @@ public sealed class TodoPage : SettingsPageBase
         await ShowInfo(loc.T("Settings.TodoSync.Success"));
     }
 
-    /// <summary>使用教程卡片：两步说明 + "打开webnote"按钮（打开 https://webnote.cc/，需求）。
-    /// 教程只针对云同步，所以下拉选"启用云同步"时才显示。</summary>
-    private void BuildTutorialCard()
-    {
-        var content = new StackPanel { Spacing = 4 };
-        content.Children.Add(new TextBlock
-        {
-            Text = "1. " + LocalizationService.Tr("Settings.TodoSync.Tutorial.Step1"),
-            TextWrapping = TextWrapping.Wrap,
-            Tag = "Settings.TodoSync.Tutorial.Step1"
-        });
-        content.Children.Add(new TextBlock
-        {
-            Text = "2. " + LocalizationService.Tr("Settings.TodoSync.Tutorial.Step2"),
-            TextWrapping = TextWrapping.Wrap,
-            Tag = "Settings.TodoSync.Tutorial.Step2"
-        });
-        var button = new Button
-        {
-            Content = LocalizationService.Tr("Settings.TodoSync.Tutorial"),
-            Margin = new Thickness(0, 8, 0, 0)
-        };
-        button.Click += (_, _) => SettingsActions.OpenUrl(WebNoteClient.SiteUrl);
-        content.Children.Add(button);
-
-        // 记录卡片引用：云同步下拉框切换显示/隐藏
-        _tutorialCard = MakeCard(FluentGlyphs.Globe, "Settings.TodoSync.TutorialCard", "Settings.TodoSync.TutorialCard.Sub", content);
-        _tutorialCard.Visibility = _settings.TodoCloudSyncEnabled ? Visibility.Visible : Visibility.Collapsed;
-    }
-
     /// <summary>信息弹窗</summary>
     private async Task ShowInfo(string message)
     {
@@ -1714,7 +1703,500 @@ public sealed class TodoPage : SettingsPageBase
     }
 }
 
-/// <summary>开发中占位页（随手记/剪贴板，需求）</summary>
+/// <summary>随手记设置页：云同步（webnote，便签名不能和待办相同）+ 窗口设置。
+/// 与 TodoPage 同款结构（需求）。</summary>
+public sealed class NotePage : SettingsPageBase
+{
+    private readonly AppSettings _settings = SettingsService.Instance.Settings;
+
+    private readonly TextBox _noteNameBox = new() { MinWidth = 220 };
+    private readonly PasswordBox _notePwdBox = new() { MinWidth = 220 };
+    private readonly Button _saveButton = new() { MinWidth = 100 };
+
+    public NotePage()
+    {
+        BuildSyncCard();
+        BuildTriggerCard();
+        BuildAlwaysOnTopCard();
+        BuildLockSizeCard();
+        BuildShowPositionCard();
+    }
+
+    /// <summary>云同步卡片：下拉框 + 便签名称/密码 + 保存（与待办同款，名称不能和待办相同）</summary>
+    private void BuildSyncCard()
+    {
+        var loc = LocalizationService.Instance;
+
+        var comboBox = new ComboBox
+        {
+            MinWidth = 160,
+            ItemsSource = new[]
+            {
+                LocalizationService.Tr("Settings.NoteSync.Disable"),
+                LocalizationService.Tr("Settings.NoteSync.Enable")
+            },
+            SelectedIndex = _settings.NoteCloudSyncEnabled ? 1 : 0
+        };
+
+        var nameRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        nameRow.Children.Add(new TextBlock
+        {
+            Text = loc.T("Settings.NoteSync.NoteName"),
+            VerticalAlignment = VerticalAlignment.Center,
+            MinWidth = 70,
+            Tag = "Settings.NoteSync.NoteName"
+        });
+        _noteNameBox.PlaceholderText = loc.T("Settings.NoteSync.NoteName");
+        _noteNameBox.Text = _settings.NoteSyncName;
+        nameRow.Children.Add(_noteNameBox);
+
+        var pwdRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Margin = new Thickness(0, 6, 0, 0) };
+        pwdRow.Children.Add(new TextBlock
+        {
+            Text = loc.T("Settings.NoteSync.NotePwd"),
+            VerticalAlignment = VerticalAlignment.Center,
+            MinWidth = 70,
+            Tag = "Settings.NoteSync.NotePwd"
+        });
+        _notePwdBox.PlaceholderText = loc.T("Settings.NoteSync.NotePwd");
+        _notePwdBox.Password = _settings.NoteSyncPwd;
+        pwdRow.Children.Add(_notePwdBox);
+
+        // 小眼睛按钮：切换明文/密文（与待办同款）
+        var eyeButton = new Button
+        {
+            Width = 34,
+            Height = 34,
+            Padding = new Thickness(0),
+            BorderThickness = new Thickness(0),
+            CornerRadius = new CornerRadius(6),
+            Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
+            Content = new FontIcon
+            {
+                Glyph = "\uE7B3", // RedEye
+                FontSize = 14,
+                FontFamily = new FontFamily(FluentGlyphs.FontFamilyName)
+            }
+        };
+        ToolTipService.SetToolTip(eyeButton, loc.T("Settings.TodoSync.ShowPwd"));
+        eyeButton.Click += (_, _) =>
+        {
+            var showing = _notePwdBox.PasswordRevealMode == PasswordRevealMode.Visible;
+            _notePwdBox.PasswordRevealMode = showing ? PasswordRevealMode.Hidden : PasswordRevealMode.Visible;
+            ((FontIcon)eyeButton.Content).Glyph = showing ? "\uE7B3" : "\uED1A";
+        };
+        pwdRow.Children.Add(eyeButton);
+
+        _saveButton.Content = loc.T("Dialog.Save");
+        _saveButton.IsEnabled = IsSaveInputValid();
+        var saveRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 10, 0, 0) };
+        saveRow.Children.Add(_saveButton);
+
+        var fields = new StackPanel { Margin = new Thickness(0, 10, 0, 0) };
+        fields.Children.Add(nameRow);
+        fields.Children.Add(pwdRow);
+        fields.Children.Add(saveRow);
+        fields.Visibility = _settings.NoteCloudSyncEnabled ? Visibility.Visible : Visibility.Collapsed;
+
+        _noteNameBox.TextChanged += (_, _) => _saveButton.IsEnabled = IsSaveInputValid();
+        _notePwdBox.PasswordChanged += (_, _) => _saveButton.IsEnabled = IsSaveInputValid();
+        _saveButton.Click += async (_, _) => await SaveSyncConfigAsync();
+
+        comboBox.SelectionChanged += (_, _) =>
+        {
+            var enable = comboBox.SelectedIndex == 1;
+            if (!enable)
+            {
+                _settings.NoteCloudSyncEnabled = false;
+                SettingsService.Instance.Save();
+            }
+            fields.Visibility = enable ? Visibility.Visible : Visibility.Collapsed;
+            App.Instance.OnNoteSyncSettingsChanged();
+        };
+
+        var content = new StackPanel();
+        content.Children.Add(comboBox);
+        content.Children.Add(fields);
+        MakeCard(FluentGlyphs.Sync, "Settings.NoteSync", "Settings.NoteSync.Sub", content);
+    }
+
+    private bool IsSaveInputValid() =>
+        !string.IsNullOrWhiteSpace(_noteNameBox.Text) && !string.IsNullOrWhiteSpace(_notePwdBox.Password);
+
+    /// <summary>随手记便签名称是否和待办的重复（需求：两者不能相同）</summary>
+    private bool IsDuplicateWithTodoSync(string name)
+    {
+        var todoName = SettingsService.Instance.Settings.TodoNoteName;
+        return !string.IsNullOrEmpty(todoName) &&
+               string.Equals(name, todoName, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>保存云同步配置：查重 → 警示框 → 接口验证 → 落盘（与待办同款流程）</summary>
+    private async Task SaveSyncConfigAsync()
+    {
+        var loc = LocalizationService.Instance;
+
+        // 便签名称查重（需求：不能和待办的相同）
+        if (IsDuplicateWithTodoSync(_noteNameBox.Text.Trim()))
+        {
+            await ShowInfo(loc.T("Settings.NoteSync.NameDuplicate"));
+            return;
+        }
+
+        var warning = new ContentDialog
+        {
+            XamlRoot = Content.XamlRoot,
+            Title = loc.T("Settings.NoteSync.WarningTitle"),
+            Content = loc.T("Settings.NoteSync.Warning"),
+            PrimaryButtonText = loc.T("Dialog.Ok"),
+            CloseButtonText = loc.T("Dialog.Cancel"),
+            DefaultButton = ContentDialogButton.Primary
+        };
+        if (await warning.ShowAsync() != ContentDialogResult.Primary) return;
+
+        _saveButton.IsEnabled = false;
+        var fetch = await WebNoteClient.FetchOrCreateAsync(_noteNameBox.Text.Trim(), _notePwdBox.Password);
+        _saveButton.IsEnabled = true;
+
+        if (!fetch.Success)
+        {
+            var message = loc.T(fetch.ErrorKey ?? "WebNote.NetworkError");
+            if (!string.IsNullOrEmpty(fetch.RawError)) message += "\n" + fetch.RawError;
+            await ShowInfo(message);
+            return;
+        }
+
+        _settings.NoteSyncName = _noteNameBox.Text.Trim();
+        _settings.NoteSyncPwd = _notePwdBox.Password;
+        _settings.NoteCloudSyncEnabled = true;
+        SettingsService.Instance.Save();
+        App.Instance.OnNoteSyncSettingsChanged();
+        await ShowInfo(loc.T("Settings.NoteSync.Success"));
+    }
+
+    /// <summary>随手记"显示和隐藏"卡片：使用快捷键（默认 Alt+3）</summary>
+    private void BuildTriggerCard()
+    {
+        var hotkeyRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        var hotkeyCheck = new CheckBox
+        {
+            Content = LocalizationService.Tr("Settings.Trigger.Hotkey"),
+            IsChecked = _settings.NoteTriggerHotkey
+        };
+        var hotkeyBox = new TextBox
+        {
+            IsReadOnly = true,
+            Text = _settings.NoteHotkeyText,
+            MinWidth = 120,
+            PlaceholderText = LocalizationService.Tr("Settings.Trigger.HotkeyHint")
+        };
+
+        void ApplyHotkey()
+        {
+            SettingsService.Instance.Save();
+            App.Instance.RegisterHotkey();
+        }
+        hotkeyCheck.Checked += (_, _) => { _settings.NoteTriggerHotkey = true; ApplyHotkey(); };
+        hotkeyCheck.Unchecked += (_, _) => { _settings.NoteTriggerHotkey = false; ApplyHotkey(); };
+
+        hotkeyBox.GotFocus += (_, _) => hotkeyBox.Text = LocalizationService.Tr("Settings.Trigger.HotkeyRecording");
+        hotkeyBox.KeyDown += (_, e) =>
+        {
+            e.Handled = true;
+            var key = (int)e.Key;
+            if (key is (int)Windows.System.VirtualKey.Control or (int)Windows.System.VirtualKey.LeftControl
+                or (int)Windows.System.VirtualKey.RightControl or (int)Windows.System.VirtualKey.Menu
+                or (int)Windows.System.VirtualKey.LeftMenu or (int)Windows.System.VirtualKey.RightMenu
+                or (int)Windows.System.VirtualKey.Shift or (int)Windows.System.VirtualKey.LeftShift
+                or (int)Windows.System.VirtualKey.RightShift or (int)Windows.System.VirtualKey.LeftWindows
+                or (int)Windows.System.VirtualKey.RightWindows)
+            {
+                return;
+            }
+
+            var modifiers = 0;
+            var modifiersState = Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(Windows.System.VirtualKey.Control);
+            if ((modifiersState & Windows.UI.Core.CoreVirtualKeyStates.Down) != 0) modifiers |= Win32Helper.MOD_CONTROL;
+            modifiersState = Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(Windows.System.VirtualKey.Menu);
+            if ((modifiersState & Windows.UI.Core.CoreVirtualKeyStates.Down) != 0) modifiers |= Win32Helper.MOD_ALT;
+            modifiersState = Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(Windows.System.VirtualKey.Shift);
+            if ((modifiersState & Windows.UI.Core.CoreVirtualKeyStates.Down) != 0) modifiers |= Win32Helper.MOD_SHIFT;
+            modifiersState = Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(Windows.System.VirtualKey.LeftWindows);
+            if ((modifiersState & Windows.UI.Core.CoreVirtualKeyStates.Down) != 0) modifiers |= Win32Helper.MOD_WIN;
+
+            _settings.NoteHotkeyModifiers = modifiers == 0 ? Win32Helper.MOD_ALT : modifiers;
+            _settings.NoteHotkeyVirtualKey = key;
+            _settings.NoteHotkeyText = BuildHotkeyText(modifiers, key);
+            hotkeyBox.Text = _settings.NoteHotkeyText;
+            ApplyHotkey();
+        };
+        hotkeyRow.Children.Add(hotkeyCheck);
+        hotkeyRow.Children.Add(hotkeyBox);
+
+        MakeCard(FluentGlyphs.Keyboard, "Settings.NoteTrigger", "Settings.NoteTrigger.Sub", hotkeyRow);
+    }
+
+    /// <summary>构造快捷键显示文本（与 LauncherPage/TodoPage 同款）</summary>
+    private static string BuildHotkeyText(int modifiers, int vk)
+    {
+        var parts = new List<string>();
+        if ((modifiers & Win32Helper.MOD_CONTROL) != 0) parts.Add("Ctrl");
+        if ((modifiers & Win32Helper.MOD_ALT) != 0) parts.Add("Alt");
+        if ((modifiers & Win32Helper.MOD_SHIFT) != 0) parts.Add("Shift");
+        if ((modifiers & Win32Helper.MOD_WIN) != 0) parts.Add("Win");
+        parts.Add(((Windows.System.VirtualKey)vk).ToString());
+        return string.Join("+", parts);
+    }
+
+    private void BuildAlwaysOnTopCard()
+    {
+        var check = new CheckBox { Content = LocalizationService.Tr("Common.Enable"), IsChecked = _settings.NoteAlwaysOnTop };
+        check.Checked += (_, _) => { _settings.NoteAlwaysOnTop = true; SaveAndApplyBehavior(); };
+        check.Unchecked += (_, _) => { _settings.NoteAlwaysOnTop = false; SaveAndApplyBehavior(); };
+        MakeCard(FluentGlyphs.Pin, "Settings.NoteAlwaysOnTop", "Settings.NoteAlwaysOnTop.Sub", check);
+    }
+
+    private void BuildLockSizeCard()
+    {
+        var check = new CheckBox { Content = LocalizationService.Tr("Common.Enable"), IsChecked = _settings.NoteLockSize };
+        check.Checked += (_, _) => { _settings.NoteLockSize = true; SaveAndApplyBehavior(); };
+        check.Unchecked += (_, _) => { _settings.NoteLockSize = false; SaveAndApplyBehavior(); };
+        MakeCard(FluentGlyphs.Lock, "Settings.NoteLockSize", "Settings.NoteLockSize.Sub", check);
+    }
+
+    private void BuildShowPositionCard()
+    {
+        var comboBox = new ComboBox
+        {
+            MinWidth = 200,
+            ItemsSource = new[]
+            {
+                LocalizationService.Tr("Settings.ShowPosition.FollowMouse"),
+                LocalizationService.Tr("Settings.ShowPosition.Center"),
+                LocalizationService.Tr("Settings.ShowPosition.TopLeft"),
+                LocalizationService.Tr("Settings.ShowPosition.TopRight"),
+                LocalizationService.Tr("Settings.ShowPosition.BottomLeft"),
+                LocalizationService.Tr("Settings.ShowPosition.BottomRight"),
+                LocalizationService.Tr("Settings.ShowPosition.LastPosition")
+            },
+            SelectedIndex = (int)_settings.NoteShowPosition
+        };
+        comboBox.SelectionChanged += (_, _) =>
+        {
+            _settings.NoteShowPosition = (ShowPosition)comboBox.SelectedIndex;
+            SettingsService.Instance.Save();
+        };
+        MakeCard(FluentGlyphs.Home, "Settings.NoteShowPosition", "Settings.NoteShowPosition.Sub", comboBox);
+    }
+
+    private void SaveAndApplyBehavior()
+    {
+        SettingsService.Instance.Save();
+        App.Instance.ApplyNoteWindowBehavior();
+    }
+
+    private async Task ShowInfo(string message)
+    {
+        var dialog = new ContentDialog
+        {
+            XamlRoot = Content.XamlRoot,
+            Content = message,
+            CloseButtonText = LocalizationService.Tr("Dialog.Ok"),
+            DefaultButton = ContentDialogButton.Close
+        };
+        await dialog.ShowAsync();
+    }
+}
+
+/// <summary>剪贴板设置页：启用开关 + 最大记录数 + 窗口设置（快捷键/锁定尺寸/显示位置）。</summary>
+public sealed class ClipboardPage : SettingsPageBase
+{
+    private readonly AppSettings _settings = SettingsService.Instance.Settings;
+
+    public ClipboardPage()
+    {
+        BuildEnabledCard();
+        BuildMaxRecordsCard();
+        BuildTriggerCard();
+        BuildLockSizeCard();
+        BuildShowPositionCard();
+    }
+
+    /// <summary>"启用本功能"卡片：启用后开始监听系统剪贴板（需求）</summary>
+    private void BuildEnabledCard()
+    {
+        var check = new CheckBox
+        {
+            Content = LocalizationService.Tr("Common.Enable"),
+            IsChecked = _settings.ClipboardEnabled
+        };
+        check.Checked += (_, _) =>
+        {
+            _settings.ClipboardEnabled = true;
+            SettingsService.Instance.Save();
+            ClipboardService.Instance.ApplyEnabledSetting(); // 开始监听
+            App.Instance.RefreshClipboardWindowView();       // 已打开的窗口立即撤掉"未启用"提醒条
+        };
+        check.Unchecked += (_, _) =>
+        {
+            _settings.ClipboardEnabled = false;
+            SettingsService.Instance.Save();
+            ClipboardService.Instance.ApplyEnabledSetting(); // 停止监听
+            App.Instance.RefreshClipboardWindowView();
+        };
+        MakeCard(FluentGlyphs.Play, "Settings.ClipboardEnable", "Settings.ClipboardEnable.Sub", check);
+    }
+
+    /// <summary>"最大保存记录数量"卡片：超出后删除最早记录（仅针对记录，不针对归档，需求）</summary>
+    private void BuildMaxRecordsCard()
+    {
+        var numberBox = new NumberBox
+        {
+            MinWidth = 160,
+            Minimum = 10,
+            Maximum = 1000,
+            SmallChange = 10,
+            SpinButtonPlacementMode = NumberBoxSpinButtonPlacementMode.Inline,
+            Value = _settings.ClipboardMaxRecords
+        };
+        numberBox.ValueChanged += (_, _) =>
+        {
+            var value = (int)Math.Round(numberBox.Value);
+            if (value < 10 || value > 1000)
+            {
+                return; // 输入过程中的临时值（超范围时 NumberBox 会自动钳制）
+            }
+            if (value == _settings.ClipboardMaxRecords)
+            {
+                return;
+            }
+            _settings.ClipboardMaxRecords = value;
+            SettingsService.Instance.Save();
+            ClipboardService.Instance.TrimToMax(); // 数量调小后立即裁剪
+        };
+        MakeCard(FluentGlyphs.Sync, "Settings.ClipboardMaxRecords", "Settings.ClipboardMaxRecords.Sub", numberBox);
+    }
+
+    /// <summary>剪贴板"显示和隐藏"卡片：使用快捷键（默认 Alt+4）</summary>
+    private void BuildTriggerCard()
+    {
+        var hotkeyRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        var hotkeyCheck = new CheckBox
+        {
+            Content = LocalizationService.Tr("Settings.Trigger.Hotkey"),
+            IsChecked = _settings.ClipboardTriggerHotkey
+        };
+        var hotkeyBox = new TextBox
+        {
+            IsReadOnly = true,
+            Text = _settings.ClipboardHotkeyText,
+            MinWidth = 120,
+            PlaceholderText = LocalizationService.Tr("Settings.Trigger.HotkeyHint")
+        };
+
+        void ApplyHotkey()
+        {
+            SettingsService.Instance.Save();
+            App.Instance.RegisterHotkey();
+        }
+        hotkeyCheck.Checked += (_, _) => { _settings.ClipboardTriggerHotkey = true; ApplyHotkey(); };
+        hotkeyCheck.Unchecked += (_, _) => { _settings.ClipboardTriggerHotkey = false; ApplyHotkey(); };
+
+        // 点击框内后按下键盘组合键自动记录（与待办/随手记快捷键一致的交互）
+        hotkeyBox.GotFocus += (_, _) => hotkeyBox.Text = LocalizationService.Tr("Settings.Trigger.HotkeyRecording");
+        hotkeyBox.KeyDown += (_, e) =>
+        {
+            e.Handled = true;
+            var key = (int)e.Key;
+            // 忽略纯修饰键
+            if (key is (int)Windows.System.VirtualKey.Control or (int)Windows.System.VirtualKey.LeftControl
+                or (int)Windows.System.VirtualKey.RightControl or (int)Windows.System.VirtualKey.Menu
+                or (int)Windows.System.VirtualKey.LeftMenu or (int)Windows.System.VirtualKey.RightMenu
+                or (int)Windows.System.VirtualKey.Shift or (int)Windows.System.VirtualKey.LeftShift
+                or (int)Windows.System.VirtualKey.RightShift or (int)Windows.System.VirtualKey.LeftWindows
+                or (int)Windows.System.VirtualKey.RightWindows)
+            {
+                return;
+            }
+
+            var modifiers = 0;
+            var modifiersState = Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(Windows.System.VirtualKey.Control);
+            if ((modifiersState & Windows.UI.Core.CoreVirtualKeyStates.Down) != 0) modifiers |= Win32Helper.MOD_CONTROL;
+            modifiersState = Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(Windows.System.VirtualKey.Menu);
+            if ((modifiersState & Windows.UI.Core.CoreVirtualKeyStates.Down) != 0) modifiers |= Win32Helper.MOD_ALT;
+            modifiersState = Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(Windows.System.VirtualKey.Shift);
+            if ((modifiersState & Windows.UI.Core.CoreVirtualKeyStates.Down) != 0) modifiers |= Win32Helper.MOD_SHIFT;
+            modifiersState = Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(Windows.System.VirtualKey.LeftWindows);
+            if ((modifiersState & Windows.UI.Core.CoreVirtualKeyStates.Down) != 0) modifiers |= Win32Helper.MOD_WIN;
+
+            _settings.ClipboardHotkeyModifiers = modifiers == 0 ? Win32Helper.MOD_ALT : modifiers;
+            _settings.ClipboardHotkeyVirtualKey = key;
+            _settings.ClipboardHotkeyText = BuildHotkeyText(modifiers, key);
+            hotkeyBox.Text = _settings.ClipboardHotkeyText;
+            ApplyHotkey();
+        };
+        hotkeyRow.Children.Add(hotkeyCheck);
+        hotkeyRow.Children.Add(hotkeyBox);
+
+        MakeCard(FluentGlyphs.Keyboard, "Settings.ClipboardTrigger", "Settings.ClipboardTrigger.Sub", hotkeyRow);
+    }
+
+    /// <summary>构造快捷键显示文本（如 Alt+4，与待办/随手记同款）</summary>
+    private static string BuildHotkeyText(int modifiers, int vk)
+    {
+        var parts = new List<string>();
+        if ((modifiers & Win32Helper.MOD_CONTROL) != 0) parts.Add("Ctrl");
+        if ((modifiers & Win32Helper.MOD_ALT) != 0) parts.Add("Alt");
+        if ((modifiers & Win32Helper.MOD_SHIFT) != 0) parts.Add("Shift");
+        if ((modifiers & Win32Helper.MOD_WIN) != 0) parts.Add("Win");
+        parts.Add(((Windows.System.VirtualKey)vk).ToString());
+        return string.Join("+", parts);
+    }
+
+    /// <summary>剪贴板"锁定尺寸"卡片</summary>
+    private void BuildLockSizeCard()
+    {
+        var check = new CheckBox { Content = LocalizationService.Tr("Common.Enable"), IsChecked = _settings.ClipboardLockSize };
+        check.Checked += (_, _) => { _settings.ClipboardLockSize = true; SaveAndApplyBehavior(); };
+        check.Unchecked += (_, _) => { _settings.ClipboardLockSize = false; SaveAndApplyBehavior(); };
+        MakeCard(FluentGlyphs.Lock, "Settings.ClipboardLockSize", "Settings.ClipboardLockSize.Sub", check);
+    }
+
+    /// <summary>剪贴板"显示位置"卡片（选项复用启动器的显示位置文案）</summary>
+    private void BuildShowPositionCard()
+    {
+        var comboBox = new ComboBox
+        {
+            MinWidth = 200,
+            ItemsSource = new[]
+            {
+                LocalizationService.Tr("Settings.ShowPosition.FollowMouse"),
+                LocalizationService.Tr("Settings.ShowPosition.Center"),
+                LocalizationService.Tr("Settings.ShowPosition.TopLeft"),
+                LocalizationService.Tr("Settings.ShowPosition.TopRight"),
+                LocalizationService.Tr("Settings.ShowPosition.BottomLeft"),
+                LocalizationService.Tr("Settings.ShowPosition.BottomRight"),
+                LocalizationService.Tr("Settings.ShowPosition.LastPosition")
+            },
+            SelectedIndex = (int)_settings.ClipboardShowPosition
+        };
+        comboBox.SelectionChanged += (_, _) =>
+        {
+            _settings.ClipboardShowPosition = (ShowPosition)comboBox.SelectedIndex;
+            SettingsService.Instance.Save(); // 显示时按此定位
+        };
+        MakeCard(FluentGlyphs.Home, "Settings.ClipboardShowPosition", "Settings.ClipboardShowPosition.Sub", comboBox);
+    }
+
+    /// <summary>保存并应用剪贴板窗口行为（锁定尺寸立即生效）</summary>
+    private void SaveAndApplyBehavior()
+    {
+        SettingsService.Instance.Save();
+        App.Instance.ApplyClipboardWindowBehavior();
+    }
+}
+
+/// <summary>开发中占位页（需求：当前没有使用它的页面，保留备用）</summary>
 public sealed class PlaceholderPage : SettingsPageBase
 {
     public PlaceholderPage(string tag)
