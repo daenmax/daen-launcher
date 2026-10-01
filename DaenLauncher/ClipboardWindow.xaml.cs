@@ -152,11 +152,12 @@ public sealed partial class ClipboardWindow : Window
         }
     }
 
-    /// <summary>应用锁定尺寸设置（设置页修改后即时生效）</summary>
+    /// <summary>应用窗口行为设置（永远置顶 / 锁定尺寸，设置页修改后即时生效）</summary>
     public void ApplyBehaviorSettings()
     {
         if (_presenter != null)
         {
+            _presenter.IsAlwaysOnTop = _settings.ClipboardAlwaysOnTop;
             _presenter.IsResizable = !_settings.ClipboardLockSize;
         }
     }

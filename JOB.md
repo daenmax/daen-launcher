@@ -403,6 +403,11 @@ build.bat / clean.bat   双击可用的编译/清理脚本
 - **修改弹窗多行显示修复**：原 TextBox 只设 MinHeight，ContentDialog 把内容压矮且无滚动条 → 多行内容只露第一行。改为固定 Height=260 + VerticalScrollBarVisibility=Auto + 显式设置 AcceptsReturn（构造后单独赋值），纵向滚动条为需求要求。
 - **测试**：Debug 0 错误 0 警告。由用户实测（多行文本修改、行高亮渐隐效果）。
 
+## 最新变更（2026-10-01 第四十一轮：剪贴板"永远置顶"设置）
+- 与待办/随手记同款：AppSettings 新增 `ClipboardAlwaysOnTop`（默认开）；ClipboardPage 在"显示和隐藏"卡片后新增"永远置顶"卡片（勾选即 `SaveAndApplyBehavior` → `App.ApplyClipboardWindowBehavior` → 窗口 `ApplyBehaviorSettings` 里 `_presenter.IsAlwaysOnTop`，即时生效）；窗口构造和每次显示路径（ActivateAndBringToFront）都会应用。
+- 语言：zh/en 各 +2 键（Settings.ClipboardAlwaysOnTop/.Sub，364 键对齐 0 缺失）。
+- **测试**：Debug 编译 0 错误 0 警告。小改动，由用户自测（勾选后剪贴板窗口应立即置顶/取消）。
+
 ## 当前进度
 - ✅ 需求1.md 主体 + 十八轮改进/修复全部完成；**"资源管理器菜单"需求已在第十九轮彻底移除（用户决定放弃）**。
 - ✅ 第二十轮：待办功能完成（窗口 + 本地存储 + webnote 云同步 + 设置页）。
@@ -416,6 +421,7 @@ build.bat / clean.bat   双击可用的编译/清理脚本
 - ✅ 第三十一轮：随手记功能上线（窗口 + 多标签云同步 + 设置页 + 便签名查重 + 热键 Alt+3）。
 - ✅ 第三十八轮：剪贴板功能上线（监听记录 + 窗口 + 再次复制 + 图片/文件支持 + 归档 + 设置页 + 热键 Alt+4）。
 - ✅ 第四十轮：复制提示改"行高亮渐隐"（用户选定）+ 修改弹窗多行显示修复。
+- ✅ 第四十一轮：剪贴板设置新增"永远置顶"（默认开，即时生效）。
 - ⚠️ 待用户实测：第十二轮（覆盖 70% 触发重排 + 滑动动画）、**第二十~三十一轮（待办/随手记全部交互、云同步、附属功能栏配置、图标选择器）**、**第三十八轮（剪贴板全部交互）**。
 - 📌 回滚点：commit 991b8b1（第十一轮拖拽可用版本）。第十二轮起改动尚未提交，确认手感后再提交新检查点。
 

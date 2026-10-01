@@ -2018,6 +2018,7 @@ public sealed class ClipboardPage : SettingsPageBase
         BuildEnabledCard();
         BuildMaxRecordsCard();
         BuildTriggerCard();
+        BuildAlwaysOnTopCard();
         BuildLockSizeCard();
         BuildShowPositionCard();
     }
@@ -2153,6 +2154,15 @@ public sealed class ClipboardPage : SettingsPageBase
         return string.Join("+", parts);
     }
 
+    /// <summary>剪贴板"永远置顶"卡片（与待办/随手记同款）</summary>
+    private void BuildAlwaysOnTopCard()
+    {
+        var check = new CheckBox { Content = LocalizationService.Tr("Common.Enable"), IsChecked = _settings.ClipboardAlwaysOnTop };
+        check.Checked += (_, _) => { _settings.ClipboardAlwaysOnTop = true; SaveAndApplyBehavior(); };
+        check.Unchecked += (_, _) => { _settings.ClipboardAlwaysOnTop = false; SaveAndApplyBehavior(); };
+        MakeCard(FluentGlyphs.Pin, "Settings.ClipboardAlwaysOnTop", "Settings.ClipboardAlwaysOnTop.Sub", check);
+    }
+
     /// <summary>剪贴板"锁定尺寸"卡片</summary>
     private void BuildLockSizeCard()
     {
@@ -2188,7 +2198,7 @@ public sealed class ClipboardPage : SettingsPageBase
         MakeCard(FluentGlyphs.Home, "Settings.ClipboardShowPosition", "Settings.ClipboardShowPosition.Sub", comboBox);
     }
 
-    /// <summary>保存并应用剪贴板窗口行为（锁定尺寸立即生效）</summary>
+    /// <summary>保存并应用剪贴板窗口行为（永远置顶 / 锁定尺寸立即生效）</summary>
     private void SaveAndApplyBehavior()
     {
         SettingsService.Instance.Save();

@@ -278,6 +278,9 @@ public sealed class AppSettings
     /// <summary>剪贴板快捷键显示文本（仅界面回显，默认 Alt+4）</summary>
     public string ClipboardHotkeyText { get; set; } = "Alt+4";
 
+    /// <summary>剪贴板：永远置顶（与待办/随手记一致，默认开）</summary>
+    public bool ClipboardAlwaysOnTop { get; set; } = true;
+
     /// <summary>剪贴板：锁定尺寸（窗口不可调整大小）</summary>
     public bool ClipboardLockSize { get; set; } = false;
 

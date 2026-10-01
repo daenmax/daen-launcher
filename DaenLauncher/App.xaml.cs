@@ -275,7 +275,7 @@ public partial class App : Application
         _clipboardWindow.ToggleViaHotkey();
     }
 
-    /// <summary>只应用剪贴板窗口行为设置（锁定尺寸变化时调用）</summary>
+    /// <summary>只应用剪贴板窗口行为设置（永远置顶 / 锁定尺寸变化时调用）</summary>
     public void ApplyClipboardWindowBehavior()
     {
         _clipboardWindow?.ApplyBehaviorSettings();

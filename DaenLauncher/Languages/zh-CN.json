@@ -336,6 +336,8 @@
   "Settings.ClipboardMaxRecords.Sub": "超出后删除最早记录（仅针对记录，不针对归档）",
   "Settings.ClipboardTrigger": "显示和隐藏",
   "Settings.ClipboardTrigger.Sub": "使用快捷键显示/隐藏剪贴板窗口",
+  "Settings.ClipboardAlwaysOnTop": "永远置顶",
+  "Settings.ClipboardAlwaysOnTop.Sub": "置顶剪贴板窗口始终在桌面最上层不会被遮挡",
   "Settings.ClipboardLockSize": "锁定尺寸",
   "Settings.ClipboardLockSize.Sub": "锁定后剪贴板窗口不可调整大小",
   "Settings.ClipboardShowPosition": "显示位置",

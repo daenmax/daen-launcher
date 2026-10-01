@@ -336,6 +336,8 @@
   "Settings.ClipboardMaxRecords.Sub": "Oldest records are removed when exceeded (records only, archives are not affected)",
   "Settings.ClipboardTrigger": "Show and hide",
   "Settings.ClipboardTrigger.Sub": "Use a hotkey to show/hide the clipboard window",
+  "Settings.ClipboardAlwaysOnTop": "Always on top",
+  "Settings.ClipboardAlwaysOnTop.Sub": "Keep the clipboard window above other windows",
   "Settings.ClipboardLockSize": "Lock size",
   "Settings.ClipboardLockSize.Sub": "The clipboard window cannot be resized when locked",
   "Settings.ClipboardShowPosition": "Show position",
