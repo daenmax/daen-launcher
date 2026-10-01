@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Window
+    x:Class="DaenLauncher.ClipboardWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d">
+
+    <Grid x:Name="RootGrid" Background="{ThemeResource SolidBackgroundFillColorBaseBrush}">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="48" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <!-- ===== 标题栏：图标 + "剪贴板"（系统关闭按钮叠在右上角，关闭 = 隐藏） ===== -->
+        <Grid x:Name="AppTitleBar" Grid.Row="0" Background="Transparent" Padding="12,0,0,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="48" />
+            </Grid.ColumnDefinitions>
+
+            <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+                <Image x:Name="TitleBarIcon" Width="20" Height="20" />
+                <TextBlock x:Name="TitleBarText" VerticalAlignment="Center"
+                           FontSize="13" FontWeight="SemiBold"
+                           Style="{ThemeResource CaptionTextBlockStyle}" />
+            </StackPanel>
+        </Grid>
+
+        <!-- ===== 内容区：分类栏（记录/归档）/ 提示条 / 列表 / 底部操作栏 =====
+             分类按钮和列表行都由代码动态构建 -->
+        <Grid Grid.Row="1" Padding="12,4,12,12">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <!-- 分类栏：记录 / 归档（代码构建，同待办窗口标签样式） -->
+            <StackPanel x:Name="TabPanel" Grid.Row="0"
+                        Orientation="Horizontal" Spacing="4" Margin="0,4,0,8" />
+
+            <!-- 提示条：功能未启用时提醒去设置开启 -->
+            <InfoBar x:Name="DisabledInfoBar" Grid.Row="1"
+                     IsOpen="False" Severity="Warning" IsClosable="False"
+                     Margin="0,0,0,8" />
+
+            <!-- 记录列表（行由代码构建，一行一条，最新的在最上） -->
+            <ScrollViewer Grid.Row="2" HorizontalScrollBarVisibility="Disabled"
+                          VerticalScrollBarVisibility="Auto">
+                <StackPanel x:Name="ListPanel" Spacing="6" />
+            </ScrollViewer>
+
+            <!-- 底部：左侧统计文字，右侧"清除全部记录"/"清除全部归档"按钮（随分类切换） -->
+            <Grid Grid.Row="3" Margin="0,8,0,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBlock x:Name="CountText" Grid.Column="0" VerticalAlignment="Center"
+                           FontSize="12" Opacity="0.7" />
+                <Button x:Name="ClearButton" Grid.Column="1"
+                        Padding="10,5" CornerRadius="6"
+                        Click="ClearButton_Click">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <FontIcon Glyph="&#xE74D;" FontSize="13" />
+                        <TextBlock x:Name="ClearButtonText" FontSize="13" />
+                    </StackPanel>
+                </Button>
+            </Grid>
+        </Grid>
+    </Grid>
+</Window>
