@@ -208,6 +208,13 @@ build.bat / clean.bat   双击可用的编译/清理脚本
   - 临时诊断程序 %TEMP%\ShellCtxTest。
 - **测试**：Debug 编译 0 错误 0 警告；build.bat 已出 Release exe。项目右键菜单回归为：以管理员身份运行 / 打开所在位置 / 复制完整路径 / 删除项目 / 编辑项目。
 
+20. **单文件 exe 验证产物内容要用未压缩的中间 DLL**：EnableCompressionInSingleFile 会压缩程序集，对 exe 做字节搜索找不到里面的字符串；查 `bin\x64\Release\...\DaenLauncher.dll` 才准。
+21. **批量补丁脚本中途失败必须立即补跑完**：脚本 NOT FOUND 退出后如果先去做别的，极易忘记剩余补丁，导致"改了但没生效"的事故（第四十四轮）；交付前对每个补丁点 grep 复查。
+
+22. **加解密实现必须全等断言回环**：DoFinal（解密）返回的是去填充后的真实长度，缓冲区尾部有残留；用"前缀比较"的回环测试放过了这个 bug（第四十六轮）。
+23. **用户的测试副本 ≠ build\ 产物**：桌面快捷方式指向 D:\Program Files\DaenLauncher\；每轮交付要提醒"退出应用→覆盖部署→核对设置-关于的版本号"。版本号在 csproj 的 Version。
+24. **PowerShell UIA 测试要点**：PS1 要 UTF-8 BOM；单实例应用按窗口名找窗口（Start-Process 的新 PID 会退出）；PS 5.1 静态方法绑定偶发失败（Move 调不动）改名绕过；构建前 taskkill 否则 DLL 被锁、复制失败但 grep error CS 看不出来。
+
 ## 关键决策（补充）——为什么放弃"资源管理器菜单"需求
 - Windows 11 的 IContextMenu 经典菜单实现破坏了教科书契约：命令表在菜单弹出过程中被重排（本机实测菜单 ID 稀疏且弹出前后布局还会变），`lpVerb = cmd - idCmdFirst` 不可用；动词字符串调用只对部分命令有效（实测仅"打开"），GCS_VALIDATE 又不被默认处理器支持。经 4 轮修复（第十五~十八轮）仍无法让全部菜单项可靠执行，且中间过程引入过进程内访问违例（0xc0000005）。**结论：在 WinUI 3 宿主里可靠弹出并执行 Windows 11 的完整 Shell 右键菜单目前没有稳定可行的纯 Win32 路径，需求放弃。** 若将来重启此需求，考虑的方向是只提供固定 canonical 动词（open/runas/properties 等自绘菜单），不再托管完整 Shell 菜单。
 
@@ -408,6 +415,126 @@ build.bat / clean.bat   双击可用的编译/清理脚本
 - 语言：zh/en 各 +2 键（Settings.ClipboardAlwaysOnTop/.Sub，364 键对齐 0 缺失）。
 - **测试**：Debug 编译 0 错误 0 警告。小改动，由用户自测（勾选后剪贴板窗口应立即置顶/取消）。
 
+## 最新变更（2026-10-02 第四十二轮：常用工具附属功能上线）
+
+- **常用工具窗口**（`ToolsWindow.xaml/.cs`，单例、关闭=隐藏、默认 1020x680 记忆大小），三栏布局：
+  - 左侧分类导航：加解密类 / 文本处理 / 格式化 / 其他常用（4 个按钮，选中=浅背景+加粗，同剪贴板标签样式）；
+  - 中间工具面板：当前工具标题 + 面板（ScrollViewer 包 ContentControl）；
+  - **右侧子功能竖向导航**（需求）：显示当前分类下的全部工具，点击切换；
+  - **工具界面缓存**：每个工具 Build 一次存 `_toolPages`，切换回来输入内容不丢；语言切换时清缓存全部重建；
+  - 窗口行为同剪贴板窗口：永远置顶（默认开）/ 锁定尺寸 / 显示位置（含上次位置 ToolsLastWindowX/Y）/ 尺寸记忆 / DPI 换算。
+- **工具框架**（`Views/Tools/`）：
+  - `ToolRegistry.cs`：IToolPage 接口 + ToolDefinition(id、语言键、工厂) + 4 分类注册表；新增工具=写类+在分类数组加一行；
+  - `ToolKit.cs`：共用 UI 构建器（标签/选项行/输入输出区/下拉框/NumberBox/主按钮/复制按钮/复选框）；
+    复制按钮 = DataPackage+SetText+`Clipboard.Flush()`，文字短暂变"已复制"反馈。
+- **加解密**（`CryptoToolPage.cs` + `CryptoEngine.cs`，NuGet 新增 **BouncyCastle.Cryptography 2.5.1**）：
+  - SM4/AES 共用一个页面；原文格式（UTF-8/Hex/Base64）× 模式（CBC/ECB/CFB/OFB/CTR/GCM）× 密钥/IV 格式 × 填充（PKCS5/PKCS7/Zeros/ISO10126/ANSIX923/ISO7816-4/NoPadding）× 输出（Hex/Base64/大写）；
+  - 多行模式（一行一个，失败行输出 [第N行失败]）+ 复杂文本处理（Tab 分隔多字段逐个处理）；
+  - **BouncyCastle 2.5.1 API 坑（实测）**：① 接口是 `IBlockCipherPadding` 不是 IPadding；填充类名 `ISO10126d2Padding`/`X923Padding`/`ISO7816d4Padding`（大小写与 Java 版不同）；② `GcmBlockCipher.DoFinal` 只有 `int DoFinal(byte[] buf, int offset)` 就地收尾版——先 ProcessBytes 写入输出缓冲，再 DoFinal(buf, written)（已用控制台程序 68 组合回环验证全过，NoPadding+非整块报错属预期）；③ CfbBlockCipher/OfbBlockCipher 的第二个参数是**字节**（传 16=CFB-128）；④ PKCS5 与 PKCS7 等价都映射 Pkcs7Padding；⑤ CFB/OFB/CTR/GCM 是流模式忽略填充选项；
+  - Hex/Base64 解码容错（去空格/冒号）；AES 密钥 16/24/32、SM4 固定 16 校验；ECB 自动隐藏 IV 行。
+- **文本处理 12 个**（`TextTools.cs`）：MD5（32/16 位大小写实时算）、URL 编解码（Escape/UnescapeDataString）、Base64 编解码、换行互转''（SQL in 用）、行行去重（可忽略首尾空格）、字符串替换（查找:换行/空格/自定义；替换为:换行/空格/删除/自定义，
+ 自动转真换行）、大小写、文本颠倒（前后/每行内）、驼峰↔下划线（逐行处理，处理 ABC 连续大写边界）、排序（首字母/首数值/长度 升降序+随机，数值=取行首数字）、去首尾空格（每行）、删空白行。
+- **格式化 3 个**（`FormatTools.cs`）：JSON 格式化/压缩/转义/去转义（自写 StripJsonComments 删 // 和 /* */ 且不伤字符串；JsonNode 解析）；XML 格式化（带声明）/压缩（XDocument）；SQL 格式化/压缩（自写 SqlFormatter：词法切分保护字符串和注释、两字关键字整组匹配换行、AND/OR/ON 缩进、括号逗号紧贴）。
+- **其他常用 7 个**（`MiscTools.cs` + `ColorPickerTool.cs`）：
+  - 行行求和：剔除 ¥￥$,，元分角 后 decimal 求和（含中间千分位逗号），显示"解析 N 行跳过 M 行"；
+  - curl 生成：按需求示例格式拼 `curl -v [-x http/socks5://host:port] [-U "user:pass"] -X 方法 "url" [-H ...] [-d '...']`，单引号体做 ''' 转义；
+  - 批量提取文件名：**TextBox 外包 Grid 接收拖放**（TextBox 不收文件拖放），StorageFolder 递归收文件，可去路径/去拓展名；
+  - 密码生成（RandomNumberGenerator 加密级随机）、UUID 生成（横杠/大小写/数量）、时间戳（顶部秒/毫秒每秒刷新，双向互转自动识别 10/13 位）；
+  - **颜色选择器**：SV 二维颜色盘（白→纯色横向渐变+透明→黑纵向渐变叠加，指示点在 Canvas 覆盖层用 SetLeft/SetTop）+ 色相滑条 + 彩虹参考条；**屏幕取色** = WH_MOUSE_LL 低级钩子（单击确认并吞掉该次点击）+ 30ms DispatcherTimer 轮询 GetCursorPos+GetPixel(整屏 DC)；输出 HEX/RGB/HSL/HSV/HWB/LAB/LCH/CMYK 八种（LAB 用 sRGB D65 标准换算）；**钩子委托必须存字段防 GC**。
+- **接线**：AuxiliaryFeatures 加 tools（图标 素材→Assets\Icons\常用工具_64.png）；MainWindow.OpenAuxiliaryFeature 分支；App 新增 ShowToolsWindow/ApplyToolsWindowBehavior，主题/材质/标题三联动全接入，退出关闭；SettingsWindow 导航 Tools => ToolsPage（置顶/锁定/显示位置三卡片）；AppSettings 新增 Tools* 7 项（默认 1020x680 居中）。
+- **语言**：zh/en 各 +170 键（Main.Tools、Settings.Tools* 6、Tools.* 全部界面文字，534 键两边对齐 0 缺失）；无单独热键（需求未提，后续可加 id=5）。
+- **测试**：Debug 0 错误 0 警告；build.bat Release 单文件产物正常；BouncyCastle 全模式/填充组合回环通过（独立控制台验证）。窗口交互和各工具实际操作由用户实测。
+
+## 最新变更（2026-10-02 第四十三轮：常用工具 9 项修补）
+
+- **根因级修复：多行处理全部失效**（用户实测 SM4 多行/换行互转只出单行）——**WinUI TextBox 的换行符是 CR（不是 LF/CRLF）**，之前按 LF 切分自然全挂。修复：ToolKit 新增 `SplitLines`（归一化 CRLF/CR/LF 后切分）、`JoinLines`（用 CRLF 拼回，显示和复制都正确）、`SetOutput` 里统一 `NormalizeNewlines`（JSON 序列化器输出的 LF 也能正常显示）。**凡是按行处理的地方（加解密多行、换行互转、去重、替换、颠倒、驼峰、排序、Trim、删空行、请求头拆行）全部切到这两个方法**；字符串替换还会先把输入归一化再 Replace（否则"查找:换行"匹配不到 CR 文本）。
+- **加解密布局调整（需求）**：输出转大写移到"多行模式"左侧（复选框行：转大写/多行/复杂文本）；密钥格式下拉框放到密钥输入框右边同一行，IV 格式同理（原独立两行删除）。
+- **左右导航选中态加蓝色竖条（需求）**：BuildNavButton 内容 = [3px 圆角竖条 Border] + 文字，竖条常驻（未选中透明）避免文字跳动，选中时用 SystemAccentColor；左右两栏导航同一套样式（模仿设置窗口 NavigationView 指示条）。
+- **JSON 转义/去转义改语义（需求）**：转义 = 只给双引号和反斜杠前加反斜杠（用户示例：塞 SQL 用，不包引号、不动换行）；去转义 = `UnescapeBackslashes` 逐字符扫描（\n/\r/\t 转真字符、\" 还原、\\ 还原，比整串 Replace 稳）。
+- **XML 增强（需求）**：新增"压缩时保留<?xml头"复选框（默认勾选；不勾则压缩时正则剥掉 XML 声明）+ 转义/反转义按钮（& < > " ' 实体互转，&amp; 最后替换防二次解错）。
+- **curl（需求）**：新增 `ToolKit.OptionRowStretch`（Grid 两列：标签固定宽 + 控件占满剩余，请求地址/请求头/请求体跟随窗口拉伸）；新增 `ToolKit.ResizableHost`（输入框右下角"◢"拖柄，拖动调宽高）——**三个坑**：Border 是密封类不能派生；ProtectedCursor 是受保护 API；Panel 没有指针虚方法——最终方案：自定义 `ResizeGripPanel : Panel`（透明背景保证可命中）+ PointerEntered/Exited 事件里 Win32 `SetCursor(LoadCursor(IDC_SIZENESW))` 换光标。
+- **批量提取文件名（需求）**：新增"遍历子目录"复选框（默认勾选=原行为），不勾则只列文件夹第一层文件。
+- **时间戳（需求）**：新增复制当前秒级/毫秒级时间戳按钮 + 复制当前时间按钮（时间格式下拉：yyyy-MM-dd HH:mm:ss 等 6 种，格式串直接当下拉文字不翻译）；CopyButton 的 Provider 是点击时求值所以取到的总是当下值。
+- **行行颠倒语义修正（需求澄清）**：只颠倒行与行的顺序（Array.Reverse 整个行数组），行内字符不动。
+- **语言**：zh/en 各 +6 键（Tools.Xml.KeepDecl/.Unescape、Tools.Ts.Copy*/TimeFormat）+1 更新（Tools.Reverse.PerLine 文案），540 键对齐。
+- **测试**：Debug 0 错误 0 警告；build.bat Release 正常。多行修复影响所有按行工具，请用户重点复测。
+
+## 最新变更（2026-10-02 第四十四轮：常用工具热键 + 7 项修补）
+
+- **常用工具快捷键 Alt+5（需求）**：完整走"注册+分发+订阅"三件套——AppSettings 新增 ToolsTriggerHotkey/Modifiers/VirtualKey/Text（默认 Alt+5、默认关）；Win32Helper 新增 HotkeyIdTools=5 + ToolsHotkeyPressed 事件 + HandleHotkeyMessage case（**必须放在 default 之前**，否则 Alt+5 会落进 default 触发主窗口显隐）；App.SetupHotkeys 订阅 + RegisterHotkey 注册；ToolsWindow.ToggleViaHotkey（与剪贴板同款）；设置-常用工具页新增"显示和隐藏"卡片（BuildHotkeyText 复制了一份到 ToolsPage——它是 ClipboardPage 的 private 方法，下轮可考虑上移到 SettingsPageBase）。
+- **加解密参数区改紧凑网格（需求）**：废弃左右两个 StackPanel（间距 30 太远），改单 Grid 四列（标签100|控件|标签100|控件，ColumnSpacing/RowSpacing=12/8）：原文格式+填充方式同行、加密模式+输出格式同行、密钥+密钥格式一行、IV+IV 格式一行。ECB 隐藏 IV 时连标签一起藏（_ivLabel 字段）。
+- **字符串替换"查找:换行"失效（用户实测）**：第四十三轮把输入归一化成 CRLF 后，查找串 "\n" 只能匹配到 CRLF 的后半截（剩个孤 CR，显示上还是换行）。修复：替换前归一化成 **LF**（string.Join("\n", SplitLines(...))），查找/替换都基于 LF 做，输出由 SetOutput 统一回 CRLF。
+- **文本排序"完全无效"（用户实测）**：第四十三轮批量替换漏了 `.Split('\n').ToList()` 变体（排序那行的调用形态不同没匹配上），单行文本没切开排序等于没排。已切到 ToolKit.SplitLines。**教训：批量替换后要 grep 复查所有变体**。
+- **XML 压缩丢声明（用户实测）**：XDocument.ToString() 本来就不输出 XML 声明（经典坑），之前只在格式化路径手动拼了声明。修复：压缩时勾选"保留<?xml头"就手动拼回 doc.Declaration。
+- **批量提取文件名（用户反馈）**："遍历子目录"键漏了汉化（补 Tools.FileNames.Recurse）；**递归逻辑复核无误**（CollectFilesAsync(folder, paths, recurse) 内部 sub && recurse 才递归）——用户"勾不勾都递归"的现象怀疑是旧实例/旧 exe（工具窗口单例缓存页面，重开进程才生效），已请用户用新构建复测。
+- **时间戳（需求）**："时间戳 → 时间"改用时间格式下拉框里选的格式输出（此前固定 yyyy-MM-dd HH:mm:ss）。
+- **README.md 更新（需求）**：附属功能下新增"🧰 常用工具"小节（四类工具 + 快捷键 Alt+5），窗口联动清单加上常用工具。
+- **语言**：zh/en 各 +3 键（Settings.ToolsTrigger/.Sub、Tools.FileNames.Recurse），543 键对齐。
+- **测试**：Debug 0 错误 0 警告；build.bat Release 正常。由用户实测（重点：Alt+5 热键、加解密紧凑布局、替换/排序、XML 压缩带声明、文件名遍历勾选）。
+
+## 最新变更（2026-10-02 第四十五轮：第四十四轮补丁事故修复 + 3 个真 bug）
+
+- **重大事故复盘：第四十四轮有 4 个补丁从未生效**（用户复测替换/排序/XML/时间戳全部"没生效"，实锤）。根因：patch 脚本中途 NOT FOUND 退出后，我只做了去重和后续编辑，**没有回头把剩余补丁执行完**就编译交付了。已补执行（ReplaceTool 归一化 LF、SortTool 的 .ToList() 漏改变体、XML 压缩拼声明、时间戳转时间用格式下拉）。**教训：批量补丁脚本必须一次跑完并 grep 验证每一处；脚本中途失败后禁止"先做别的稍后再说"**。
+- **导航蓝色竖条压住第一个字（用户实测）**：BuildNavButton 的 Grid 没建 ColumnDefinition，竖条和文字叠在同一个单元格里。修复：两列布局（Auto 竖条列 + * 文字列）。
+- **批量提取文件名递归（用户两次实测勾不勾都递归）**：StorageFolder.GetItemsAsync 版本逻辑复核无误但现象仍在，改为 **System.IO 确定性实现**——拖放项 File.Exists → 直接加；Directory.Exists → `Directory.EnumerateFiles(path, "*", EnumerationOptions { RecurseSubdirectories = 勾选 })`；勾选状态在 await 前先读进局部变量。另注：如果拖的是搜索结果/Everything 里选中的多个文件，那些文件本身就是拖放内容（可能来自不同子目录），与"遍历子目录"开关无关。
+- **多行解密只出一行（用户实测）**：通读 CryptoToolPage，加解密共用 RunMultiLine，代码对称无明显问题；用控制台程序完整模拟"TextBox 的 \r 换行 → 逐行加密 → \r\n 拼接 → 粘回 → 逐行解密"回环，3 行全部正确解出——**引擎层无此 bug**。健壮性加固：RunMultiLine 逐行 Trim（尾随空格会导致 Hex/Base64 解码失败）。若用户仍复现，输出里的"[第N行失败: 原因]"标记会给出真实错误，让用户把标记内容反馈回来。
+- **产物验证方法**：单文件 exe 开了 EnableCompressionInSingleFile，**字节搜索验证不到内容**（压缩后字符串不可见）；要验证产物新旧，查 `bin\x64\Release\net10.0-...\win-x64\DaenLauncher.dll`（未压缩中间产物）的特征串。本轮已验证 DLL 含全部新代码。
+- **测试**：Debug 0 错误 0 警告；build.bat Release 正常；多行加解密回环控制台实测通过。由用户复测（替换、排序、XML 压缩声明、时间戳格式、蓝条、文件名递归、多行解密）。
+
+## 最新变更（2026-10-02 第四十六轮：多行解密根因修复 + 部署真相）
+
+- **多行解密只出一行——根因找到并用真实 UI 复实**（用户两次反馈，前两轮的"代码审查没问题"是误判）。根因：`CryptoEngine.RunBuffered` **忽略了 `DoFinal` 的返回值**——解密时它返回"去填充后的真实长度"（如 3），但代码返回了整个输出缓冲区（16 字节），尾部 13 个填充区残留 NUL 字节跟着进了明文。多行时每行明文都带一串 NUL，TextBox 渲染把第二行吞掉（视觉上"只有一行"）。修复：按 `ProcessBytes + DoFinal` 的实际长度截断返回。**教训：我的引擎回环测试用"前缀比较"（`back[..pt.Length] == pt`）而非全等，恰好放过了这个 bug——加解密测试必须全等断言。**
+- **复现手段（重要资产）**：PowerShell UIA 自动化驱动真实 UI——Start-Process 启动 → 找"Daen Launcher"主窗口 → 点附属功能按钮 → 常用工具窗口 → ValuePattern 填输入框/密钥/IV → TogglePattern 勾选 → Invoke 加密/解密 → ValuePattern 读输出。配合 RunCore 临时日志（input/result 的 repr）拿到第一手证据：result=[123+13×NUL <CR><LF> 123+13×NUL]。**坑：① PS1 脚本必须 UTF-8 BOM 否则中文乱码解析失败；② 应用单实例——脚本 Start-Process 后要按窗口名（不是新 PID）找窗口；③ PowerShell 5.1 对某些静态方法名（如 Move）绑定失败（GetMethods 能看到却调不动），改名（MoveTo）绕过；④ 运行中的应用会锁住 DLL，构建前必须先 taskkill（我曾因此构建了旧代码还不自知——grep 只匹配 error CS 漏掉了文件占用错误）。**
+- **批量提取文件名递归：彻底重写为 System.IO**——`Directory.EnumerateFiles(path, "*", EnumerationOptions { RecurseSubdirectories = 勾选 })`，勾选状态在任何 await 之前先读进局部变量；删除 StorageFolder 递归版。枚举语义已用控制台程序在用户同款测试文件夹（桌面\应用）上验证：不勾选=6 个文件（仅第一层），勾选=23 个。老的 StorageFolder 版逻辑反复审查无错、GetItemsAsync 实测也只返回第一层，用户的"勾不勾都递归"最可能与部署滞后有关（见下条）。
+- **部署真相（本轮最大发现）**：用户桌面快捷方式指向 **`D:\Program Files\DaenLauncher\DaenLauncher.exe`——不是 build\ 下我构建的产物**！用户测的是手动部署的旧副本，这解释了此前多轮"修复没生效"（叠加真实的 DoFinal bug）。**措施：csproj 版本号 1.0.0 → 1.1.0（设置-关于可见），以后每轮交付让用户核对版本确认部署到位；交付说明里明确"先完全退出托盘里的应用，再把 build\DaenLauncher.exe 复制到 D:\Program Files\DaenLauncher\ 覆盖"。**
+- **保留一轮 OnDrop 临时日志**（MiscTools，写 data\uia_debug.log，记录 recurse 勾选状态/文件数/路径清单）——若用户在新版本上仍见递归异常，让其提供该日志即可精确定位；确认正常后删除。
+- **测试**：Debug/Release 0 错误 0 警告；UIA 真实 UI 回归：多行加密输出 2 行、解密输出干净 2 行（123\r123）；枚举语义 6/23 验证通过。
+
+## 最新变更（2026-10-06 第四十七轮：必应每日壁纸附属功能上线）
+
+> 用户消息开头写的是"常用工具"，但内容/图标/数据目录全是壁纸——"常用工具"是第四十二轮已上线的功能，本轮实为**新的附属功能：必应每日壁纸**（热键顺位 Alt+2/3/4/5/6 的 6 也印证）。
+
+- **窗口**（`WallpaperWindow.xaml/.cs`，单例、关闭=隐藏、默认 960x640 记忆大小）：
+  - 整幅圆角壁纸卡片铺满窗口（**Grid 自带 CornerRadius 能裁剪内部 Image，Border 不能**）；`UniformToFill` 等比铺满 + 底部黑色渐变遮罩上叠"日期大字（按语言格式化，zh=2026年10月06日）+ copyright 小字（最多两行）"；
+  - 右下角强调色"更换壁纸"按钮（Sync 图标），点击 = 获取→下载→换桌面壁纸→记录→按需保存本地，成功后按钮文字短暂变"已更换"（与工具"已复制"同款反馈），失败显示顶部 Error InfoBar；
+  - **打开窗口只展示不更换**：先秒显 record.json 里的上次结果（本地缓存无网络等待），再后台抓今日元数据+图片刷新；ProgressRing 加载态；
+  - 窗口行为与常用工具同款：置顶（默认开）/锁定尺寸/显示位置（含上次位置 WallpaperLastWindowX/Y）/尺寸记忆/热键 Alt+6 显隐；三项联动（标题/材质/主题）全接入。
+- **服务**（`Services/WallpaperService.cs` + `Models/WallpaperModels.cs`）：
+  - 常量类 `WallpaperConstants`：接口地址、尺寸后缀（_1920x1080.jpg/_UHD.jpg）、来源标记（official/biturl）、域名（www/cn/global.bing.com）、日期格式 yyyyMMdd 全部集中（禁硬编码）；
+  - **官方接口**：HPImageArchive.aspx 取 images[0] 的 urlbase/copyright/enddate，直链 = 域名前缀 + urlbase + 尺寸后缀；**biturl 接口**：取 url/copyright/end_date，从 "/th?id=" 截取路径、`LastIndexOf('_')` 去掉旧尺寸段（OHR 图片 id 自带下划线，尺寸一定是最后一段）、拼新后缀——两个来源拼链方式统一；
+  - 换壁纸 = 写注册表 WallpaperStyle=10（填充）+ `SystemParametersInfo(SPI_SETDESKWALLPAPER)`（SetLastError，失败抛错码）；图片缓存 `data\wallpaper\cache\{enddate}_{尺寸}.jpg`（同日同尺寸复用不重复下载）；
+  - **每日更换记录** `data\wallpaper\record.json`（JsonStore）：LastChangeDate（yyyyMMdd，"每日自动更换"据此判断今天是否已换过）+ 当前壁纸的 enddate/copyright/url/尺寸/完整时间；启动时 `Initialize()` 若勾选自动更换且今天没换过 → 后台自动更换（失败等 20 秒重试，最多 3 次——开机时网络常未就绪）；
+  - 保存本地：更换成功（手动/自动都算）后按 `{enddate}_{尺寸}.jpg` 复制到设置目录；设置留空 = 默认 `data\wallpaper\image`（留空而非存路径，数据目录回退 LocalAppData 时默认位置仍正确）；
+  - `_applyLock` 信号量防自动+手动并发更换。
+- **设置页**（WallpaperPage，设置导航插在常用工具和关于之间）：壁纸尺寸（1080P 默认/4K）、数据来源（官方默认/biturl）、数据下载（通用默认/中国/全球）、每日自动更换（默认关）、保存壁纸文件到本地（默认关）、壁纸文件保存目录（输入框+浏览按钮，**仅勾选保存后可改**，FolderPicker 挂主窗口句柄 `InitializeWithWindow`，失焦提交、留空回显解析后的默认路径）、显示和隐藏（Alt+6，热键三件套注册+分发+订阅齐全，id=6）、永远置顶/锁定尺寸/显示位置。FluentGlyphs 新增 Download=\uE896。
+- **接线**：AuxiliaryFeatures 加 wallpaper（图标 素材→Assets\Icons\必应每日壁纸_64.png）；MainWindow.OpenAuxiliaryFeature 分支；App 新增 ShowWallpaperWindow/ToggleWallpaperWindow/ApplyWallpaperWindowBehavior + 启动时 WallpaperService.Initialize()，主题/材质/标题/退出联动全接入；AppSettings 新增 Wallpaper* 16 项；语言 zh/en 各 +36 键（579 键两边对齐 0 缺失，日期格式串 Wallpaper.DateFormat 也进语言文件，en 用 "MMMM d, yyyy"）。
+- **编译坑（新）**：`PickerLocationId` 在 `Windows.Storage.Pickers` 命名空间下，不能裸写（其余页面用 FileSavePicker 时也没写 SuggestedStartLocation 所以没暴露）。
+- **产物验证**：Debug/Release 0 错误 0 警告；单文件 exe 已复制 build\；中间 DLL 探测（字符串字面量在 US 堆是 **UTF-16**，ASCII 探测会假阴性，要按 utf-16-le 探）确认 WallpaperService/WallpaperWindow/WallpaperPage、接口地址、图标资源全部在内。
+- **测试**：接口/换壁纸/记录/保存目录待用户实测（重点：4K 尺寸直链是否有效、biturl 来源、每日自动更换的开机时机、保存目录浏览选择）。
+
+## 最新变更（2026-10-07 第四十八轮：壁纸 toast 通知 + 显示模式 + 缓存清理策略）
+
+- **更换成功弹系统 Toast（需求）**：新 `Services/ToastService.cs`——ToastGeneric 模板（**hero 大图**=壁纸文件 + 标题"壁纸已更换" + 日期 + copyright 描述），在 `ApplyWallpaperAsync` 成功路径调用（手动按钮/开机自动更换都会弹）；失败只写 crash.log 绝不影响换壁纸。
+  - **解包应用发通知的 AUMID 双保障**：① 注册表 `HKCU\Software\Classes\AppUserModelId\<AUMID>`（DisplayName=appconfig 的 AppName、IconUri=exe）；② 用户开始菜单 `Daen Launcher.lnk`（缺失自动重建，进程内只查一次）。**快捷方式带 AUMID 必须走 IShellLinkW + IPropertyStore 写 PKEY_AppUserModel_ID（{9F4C2855-...}，pid=5）——WScript.Shell 做不了这件事**；PROPVARIANT 用 VT_LPWSTR（vt=31，指针在偏移 8），结构体尾部补到 24 字节（x64 真实大小）。
+  - **坑（CS0030）**：ComImport 的 ShellLink coclass **不能标 sealed**，否则"类实例 cast 到 COM 接口"直接编译失败；另 `PickerLocationId` 上轮已记。
+  - **独立控制台端到端实测通过**：官方接口→拼链→下载 336KB→注册表→快捷方式→`CreateToastNotifier(AUMID).Show()` 无异常（用户屏幕已弹过测试通知，enddate=20261007 直链有效）。测试现场已清理（开始菜单的 Daen Launcher.lnk 和注册表 AUMID 是应用自身要创建的，保留无害）。
+- **"模式"设置（需求）**：`AppSettings.WallpaperStyle`（stretch 默认 / fit / fill / tile / center / span，设置页新卡片插在"壁纸尺寸"下面）→ 注册表映射：拉伸=2、适应=6、填充=10、平铺=0+TileWallpaper=1、居中=0、跨区=22（TileWallpaper=0）；常量全在 WallpaperConstants（RegistryStyle* / TileOn/Off）。旧版固定"填充"的行为被本设置取代。
+- **cache 目录清理策略（用户问题：cache 什么时候删？此前实现永不删除会无限堆积）**：
+  - 每次展示下载后：清理"既不是记录里当前壁纸、也不是本次下载"的文件；
+  - 每次更换成功后：只保留刚设置的那张；
+  - 被占用的文件跳过下次再删；效果 = cache 最多 1~2 张（当前桌面壁纸 + 今日展示图），旧的自动消失，image 目录（保存到本地）不受影响。
+- **语言**：zh/en 各 +9 键（Settings.WallpaperStyle 8 + Notification.WallpaperChanged，588 键对齐 0 缺失）；版本号 1.2.0 → 1.3.0。
+- **测试**：Debug/Release 0 错误 0 警告；Release 产物已复制 build\ 并探针确认。由用户实测（重点：toast 是否带大图正常弹出、六种模式切换后的桌面效果、cache 目录只剩当前壁纸）。
+
+## 最新变更（2026-10-07 第四十九轮：数据导出/导入/删除支持壁纸数据 + README 同步）
+
+- **数据页补上必应壁纸**（用户反馈第四十七轮遗漏）：`DataService.DataItems` 加 ("wallpaper", ["wallpaper"])（导出/导入/删除三处共用）；数据页导出勾选框、导入弹窗勾选框、删除勾选框各加"必应每日壁纸"一项（BuildCheckRow 加第 6 个参数，三处调用点同步）。
+- **删除/导入后的缓存一致性**：WallpaperService 新增 `ReloadRecord()`（只重载 record.json，**故意不触发每日自动更换**——导入数据不该引起换壁纸）；删除勾选壁纸后调它 + `App.RefreshWallpaperWindowView()`（新方法）→ 壁纸窗口 `RefreshView()`：记录为空就清空画面，避免内存旧记录之后写回磁盘。导入流程本身走 PromptRestart 重启，无需额外处理。
+- **语言**：zh/en 各 +1 键（Data.Item.Wallpaper，589 键对齐）。**踩坑记录：给语言 JSON 插键时用 `content.replace('"Data.Item.Clipboard"', ...)` 会把锚点行的键和值拆开导致 JSON 损坏——插键必须按整行/行级操作，插入后必须立即 json.load 校验**（本轮已当场修复，两边文件无损恢复）。
+- **README**：设置-数据条目更新为明确列出六类数据（软件配置/启动器/待办/随手记/剪贴板/必应壁纸）。
+- 版本号 1.3.0 → 1.3.1。Debug/Release 0 错误 0 警告，产物已复制 build\ 并探针确认（ReloadRecord/RefreshWallpaperWindowView 均在）。
+- **测试**：由用户实测（导出勾壁纸 → 删除本地壁纸数据 → 导入回 → 壁纸窗口/记录恢复正常）。
+
 ## 当前进度
 - ✅ 需求1.md 主体 + 十八轮改进/修复全部完成；**"资源管理器菜单"需求已在第十九轮彻底移除（用户决定放弃）**。
 - ✅ 第二十轮：待办功能完成（窗口 + 本地存储 + webnote 云同步 + 设置页）。
@@ -422,11 +549,19 @@ build.bat / clean.bat   双击可用的编译/清理脚本
 - ✅ 第三十八轮：剪贴板功能上线（监听记录 + 窗口 + 再次复制 + 图片/文件支持 + 归档 + 设置页 + 热键 Alt+4）。
 - ✅ 第四十轮：复制提示改"行高亮渐隐"（用户选定）+ 修改弹窗多行显示修复。
 - ✅ 第四十一轮：剪贴板设置新增"永远置顶"（默认开，即时生效）。
+- ✅ 第四十二轮：常用工具功能上线（三栏窗口 + 24 个子工具：SM4/AES 加解密、文本处理 12 个、JSON/XML/SQL 格式化、行行求和/curl/文件名提取/密码/UUID/时间戳/颜色选择器 + 设置页）。
+- ✅ 第四十三轮：常用工具 9 项修补（**换行符根因修复**、加解密布局、导航蓝条、JSON/XML 转义语义、curl 布局与拖拽调大小、子目录遍历勾选、时间戳复制按钮、行行颠倒=行序反转）。
+- ✅ 第四十四轮：常用工具快捷键 Alt+5 + 7 项修补（紧凑参数网格、替换查找换行、排序漏改、XML 压缩声明、遍历子目录汉化、时间戳格式联动、README 更新）。
+- ✅ 第四十五轮：第四十四轮 4 个漏执行补丁补齐（替换/排序/XML/时间戳）+ 蓝条重叠修复 + 文件递归改 System.IO + 多行解密加固。
+- ✅ 第四十六轮：多行解密根因修复（DoFinal 长度截断，UIA 真实 UI 复现实证）+ 文件递归 System.IO 化（6/23 实测）+ 发现部署副本真相 + 版本号 1.1.0。
+- ✅ 第四十七轮：必应每日壁纸功能上线（窗口 + 官方/biturl 双接口 + 换壁纸 + 每日自动更换记录 + 保存到本地 + 设置页 + 热键 Alt+6）。
+- ✅ 第四十八轮：壁纸更换成功弹系统 Toast（大图+日期+描述）+ "模式"设置（六种显示方式）+ cache 目录自动清理策略。
+- ✅ 第四十九轮：数据导出/导入/删除支持必应壁纸数据（含删除/导入后的记录重载与窗口刷新）+ README 数据条目同步。
 - ⚠️ 待用户实测：第十二轮（覆盖 70% 触发重排 + 滑动动画）、**第二十~三十一轮（待办/随手记全部交互、云同步、附属功能栏配置、图标选择器）**、**第三十八轮（剪贴板全部交互）**。
 - 📌 回滚点：commit 991b8b1（第十一轮拖拽可用版本）。第十二轮起改动尚未提交，确认手感后再提交新检查点。
 
 ## 待办事项
-- 用户实测后修 bug。
+- 用户实测后修 bug（重点：第四十二轮常用工具的全部子工具交互、SM4/AES 各模式参数组合、屏幕取色、颜色盘拖动、文件拖拽；第四十七轮壁纸的接口连通性/换壁纸/每日自动更换）。
 - 剪贴板云同步（如需要，下轮需求；当前剪贴板仅本地存储）。
 - "左键双击桌面"、"双击任务栏"触发（预留复选框，需窗口层级判断）。
 - 关于页"应用更新"检查/自动更新。
@@ -460,3 +595,5 @@ build.bat / clean.bat   双击可用的编译/清理脚本
 17. **原生拖放识别"自己拖的"**：DragStarting 往 `args.Data.Properties[key]` 写标记，DragOver/Drop 里从 `e.DataView.Properties.TryGetValue(key, ...)` 读回（同应用拖放标记一直在，DeskBox 同款做法）；内部拖动的 DragOver 若不处理要保持"未处理"状态，事件会冒泡到外层 AllowDrop 容器（PanelHost），外部文件拖放因此不受影响。
 18. **CS0136 同名局部变量**：方法体块里先在嵌套 if 块中声明 `x`、后面又在方法级声明 `x` 会报 CS0136（C# 的块作用域是整个块，不管声明先后顺序）——嵌套块里的换名即可。
 19. **图标缓存有两层**：换 logo 后"任务栏还是旧图标"要先分清——① 应用自己的 `data\icon\cache\app.ico`（EnsureAppIconExtracted 现按字节比对自动刷新）；② Windows 资源管理器的图标缓存（按 exe 路径缓存，重启 explorer / 删 `%LocalAppData%\IconCache.db` 和 `%LocalAppData%\Microsoft\Windows\Explorer\iconcache_*.db` / 取消重新固定任务栏才能刷新）。验证技巧：把 exe 复制改名再跑，若任务栏显示新图标即实锤是系统缓存。
+
+20. **WinUI TextBox 换行符是 CR**：按行处理文本必须归一化 CRLF/CR/LF（ToolKit.SplitLines），输出统一拼 CRLF（ToolKit.JoinLines；SetOutput 自动归一化）。

@@ -409,6 +409,16 @@ public sealed partial class MainWindow : Window
             App.Instance.ShowClipboardWindow();
             return;
         }
+        if (id == AuxiliaryFeatures.ToolsId)
+        {
+            App.Instance.ShowToolsWindow();
+            return;
+        }
+        if (id == AuxiliaryFeatures.WallpaperId)
+        {
+            App.Instance.ShowWallpaperWindow();
+            return;
+        }
         _ = ShowMessageDialog(LocalizationService.Tr("Main.UnderDevelopment"),
             LocalizationService.Tr("Dialog.Info"));
     }

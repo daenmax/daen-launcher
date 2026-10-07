@@ -39,6 +39,8 @@ public partial class App : Application
     private TodoWindow? _todoWindow;
     private NoteWindow? _noteWindow;
     private ClipboardWindow? _clipboardWindow;
+    private ToolsWindow? _toolsWindow;
+    private WallpaperWindow? _wallpaperWindow;
 
     public App()
     {
@@ -139,6 +141,9 @@ public partial class App : Application
 
         // ===== 剪贴板：加载本地数据并按设置开始/停止监听系统剪贴板 =====
         ClipboardService.Instance.Initialize();
+
+        // ===== 必应壁纸：加载更换记录；开启"每日自动更换"且今天没换过则后台自动更换 =====
+        WallpaperService.Instance.Initialize();
 
         // ===== 项目完整性检测（仅在软件启动时执行一次，失效项目显示"项目无法找到"图标，需求-优化1）=====
         LauncherDataService.Instance.CheckMissingItems();
@@ -287,6 +292,68 @@ public partial class App : Application
         _clipboardWindow?.RefreshView();
     }
 
+    /// <summary>打开常用工具窗口（单例）</summary>
+    public void ShowToolsWindow()
+    {
+        if (_toolsWindow == null)
+        {
+            _toolsWindow = new ToolsWindow();
+            _toolsWindow.Closed += (_, _) => _toolsWindow = null;
+        }
+        _toolsWindow.ActivateAndBringToFront();
+    }
+
+    /// <summary>显示/隐藏常用工具窗口切换（常用工具快捷键，默认 Alt+5）</summary>
+    public void ToggleToolsWindow()
+    {
+        if (_toolsWindow == null)
+        {
+            ShowToolsWindow();
+            return;
+        }
+        _toolsWindow.ToggleViaHotkey();
+    }
+
+    /// <summary>只应用常用工具窗口行为设置（永远置顶 / 锁定尺寸变化时调用）</summary>
+    public void ApplyToolsWindowBehavior()
+    {
+        _toolsWindow?.ApplyBehaviorSettings();
+    }
+
+    /// <summary>打开必应壁纸窗口（单例）</summary>
+    public void ShowWallpaperWindow()
+    {
+        if (_wallpaperWindow == null)
+        {
+            _wallpaperWindow = new WallpaperWindow();
+            _wallpaperWindow.Closed += (_, _) => _wallpaperWindow = null;
+        }
+        _wallpaperWindow.ActivateAndBringToFront();
+    }
+
+    /// <summary>显示/隐藏必应壁纸窗口切换（壁纸快捷键，默认 Alt+6）</summary>
+    public void ToggleWallpaperWindow()
+    {
+        if (_wallpaperWindow == null)
+        {
+            ShowWallpaperWindow();
+            return;
+        }
+        _wallpaperWindow.ToggleViaHotkey();
+    }
+
+    /// <summary>只应用必应壁纸窗口行为设置（永远置顶 / 锁定尺寸变化时调用）</summary>
+    public void ApplyWallpaperWindowBehavior()
+    {
+        _wallpaperWindow?.ApplyBehaviorSettings();
+    }
+
+    /// <summary>外部变化（数据页删除/导入 wallpaper 数据）后刷新必应壁纸窗口展示</summary>
+    public void RefreshWallpaperWindowView()
+    {
+        _wallpaperWindow?.RefreshView();
+    }
+
     #endregion
 
     #region 热键
@@ -308,6 +375,8 @@ public partial class App : Application
         Win32Helper.TodoHotkeyPressed += ToggleTodoWindow;
         Win32Helper.NoteHotkeyPressed += ToggleNoteWindow;
         Win32Helper.ClipboardHotkeyPressed += ToggleClipboardWindow;
+        Win32Helper.ToolsHotkeyPressed += ToggleToolsWindow;
+        Win32Helper.WallpaperHotkeyPressed += ToggleWallpaperWindow;
         RegisterHotkey();
     }
 
@@ -352,6 +421,24 @@ public partial class App : Application
                 (uint)(settings.ClipboardHotkeyModifiers | Win32Helper.MOD_NOREPEAT),
                 (uint)settings.ClipboardHotkeyVirtualKey);
         }
+
+        // 常用工具窗口热键（id=5）
+        Win32Helper.UnregisterHotKeyId(_hotkeyWindow.Handle, Win32Helper.HotkeyIdTools);
+        if (settings.ToolsTriggerHotkey)
+        {
+            Win32Helper.RegisterHotKeyId(_hotkeyWindow.Handle, Win32Helper.HotkeyIdTools,
+                (uint)(settings.ToolsHotkeyModifiers | Win32Helper.MOD_NOREPEAT),
+                (uint)settings.ToolsHotkeyVirtualKey);
+        }
+
+        // 必应壁纸窗口热键（id=6）
+        Win32Helper.UnregisterHotKeyId(_hotkeyWindow.Handle, Win32Helper.HotkeyIdWallpaper);
+        if (settings.WallpaperTriggerHotkey)
+        {
+            Win32Helper.RegisterHotKeyId(_hotkeyWindow.Handle, Win32Helper.HotkeyIdWallpaper,
+                (uint)(settings.WallpaperHotkeyModifiers | Win32Helper.MOD_NOREPEAT),
+                (uint)settings.WallpaperHotkeyVirtualKey);
+        }
     }
 
     /// <summary>重新应用显示/隐藏触发设置（设置页修改后调用）</summary>
@@ -380,6 +467,8 @@ public partial class App : Application
         try { _todoWindow?.Close(); } catch { /* 忽略 */ }
         try { _noteWindow?.Close(); } catch { /* 忽略 */ }
         try { _clipboardWindow?.Close(); } catch { /* 忽略 */ }
+        try { _toolsWindow?.Close(); } catch { /* 忽略 */ }
+        try { _wallpaperWindow?.Close(); } catch { /* 忽略 */ }
 
         _singleInstanceMutex?.ReleaseMutex();
         Current.Exit();
@@ -420,6 +509,16 @@ public partial class App : Application
         {
             ThemeService.Apply((FrameworkElement)_clipboardWindow.Content, mode);
             ThemeService.ApplyCaptionButtonColors(_clipboardWindow.AppWindow, (FrameworkElement)_clipboardWindow.Content);
+        }
+        if (_toolsWindow != null)
+        {
+            ThemeService.Apply((FrameworkElement)_toolsWindow.Content, mode);
+            ThemeService.ApplyCaptionButtonColors(_toolsWindow.AppWindow, (FrameworkElement)_toolsWindow.Content);
+        }
+        if (_wallpaperWindow != null)
+        {
+            ThemeService.Apply((FrameworkElement)_wallpaperWindow.Content, mode);
+            ThemeService.ApplyCaptionButtonColors(_wallpaperWindow.AppWindow, (FrameworkElement)_wallpaperWindow.Content);
         }
     }
 
@@ -487,6 +586,14 @@ public partial class App : Application
         {
             BackdropService.Apply(_clipboardWindow, backdrop);
         }
+        if (_toolsWindow != null)
+        {
+            BackdropService.Apply(_toolsWindow, backdrop);
+        }
+        if (_wallpaperWindow != null)
+        {
+            BackdropService.Apply(_wallpaperWindow, backdrop);
+        }
     }
 
     /// <summary>只刷新主窗口标题（自定义标题变化时调用）</summary>
@@ -503,6 +610,8 @@ public partial class App : Application
         _todoWindow?.RefreshTitle();
         _noteWindow?.RefreshTitle();
         _clipboardWindow?.RefreshTitle();
+        _toolsWindow?.RefreshTitle();
+        _wallpaperWindow?.RefreshTitle();
         _trayService?.RefreshTooltip();
     }
 

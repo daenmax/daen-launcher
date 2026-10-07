@@ -378,6 +378,7 @@ public sealed class DataPage : SettingsPageBase
     private readonly CheckBox _exportTodo = new();
     private readonly CheckBox _exportNote = new();
     private readonly CheckBox _exportClipboard = new();
+    private readonly CheckBox _exportWallpaper = new();
 
     public DataPage()
     {
@@ -427,9 +428,9 @@ public sealed class DataPage : SettingsPageBase
         }
     }
 
-    /// <summary>导出勾选框行</summary>
+    /// <summary>导出/删除勾选框行（两项共用同一布局）</summary>
     private StackPanel BuildCheckRow(CheckBox config, CheckBox launcher, CheckBox todo,
-        CheckBox note, CheckBox clipboard)
+        CheckBox note, CheckBox clipboard, CheckBox wallpaper)
     {
         var stack = new StackPanel { Spacing = 4 };
         stack.Children.Add(config);
@@ -437,6 +438,7 @@ public sealed class DataPage : SettingsPageBase
         stack.Children.Add(todo);
         stack.Children.Add(note);
         stack.Children.Add(clipboard);
+        stack.Children.Add(wallpaper);
         return stack;
     }
 
@@ -448,6 +450,7 @@ public sealed class DataPage : SettingsPageBase
         _exportTodo.Content = loc.T("Data.Item.Todo");
         _exportNote.Content = loc.T("Data.Item.Note");
         _exportClipboard.Content = loc.T("Data.Item.Clipboard");
+        _exportWallpaper.Content = loc.T("Data.Item.Wallpaper");
         _exportConfig.IsChecked = true;
         _exportLauncher.IsChecked = true;
     }
@@ -458,7 +461,7 @@ public sealed class DataPage : SettingsPageBase
         exportButton.Click += async (_, _) => await ExportAsync();
 
         var content = new StackPanel { Spacing = 4 };
-        content.Children.Add(BuildCheckRow(_exportConfig, _exportLauncher, _exportTodo, _exportNote, _exportClipboard));
+        content.Children.Add(BuildCheckRow(_exportConfig, _exportLauncher, _exportTodo, _exportNote, _exportClipboard, _exportWallpaper));
         content.Children.Add(exportButton);
         MakeCard(FluentGlyphs.Save, "Data.Export", "Data.Export.Sub", content);
     }
@@ -467,7 +470,7 @@ public sealed class DataPage : SettingsPageBase
     {
         var keys = CollectChecked(
             (_exportConfig, "config"), (_exportLauncher, "launcher"), (_exportTodo, "todo"),
-            (_exportNote, "note"), (_exportClipboard, "clipboard"));
+            (_exportNote, "note"), (_exportClipboard, "clipboard"), (_exportWallpaper, "wallpaper"));
         if (keys.Count == 0)
         {
             await ShowInfo(LocalizationService.Tr("Data.NoSelection"));
@@ -527,7 +530,8 @@ public sealed class DataPage : SettingsPageBase
             ["launcher"] = new() { Content = loc.T("Data.Item.Launcher"), IsEnabled = available.Contains("launcher") },
             ["todo"] = new() { Content = loc.T("Data.Item.Todo"), IsEnabled = available.Contains("todo") },
             ["note"] = new() { Content = loc.T("Data.Item.Note"), IsEnabled = available.Contains("note") },
-            ["clipboard"] = new() { Content = loc.T("Data.Item.Clipboard"), IsEnabled = available.Contains("clipboard") }
+            ["clipboard"] = new() { Content = loc.T("Data.Item.Clipboard"), IsEnabled = available.Contains("clipboard") },
+            ["wallpaper"] = new() { Content = loc.T("Data.Item.Wallpaper"), IsEnabled = available.Contains("wallpaper") }
         };
         foreach (var box in boxes.Values)
         {
@@ -568,6 +572,7 @@ public sealed class DataPage : SettingsPageBase
     private readonly CheckBox _deleteTodo = new();
     private readonly CheckBox _deleteNote = new();
     private readonly CheckBox _deleteClipboard = new();
+    private readonly CheckBox _deleteWallpaper = new();
 
     private void BuildDeleteCard()
     {
@@ -577,6 +582,7 @@ public sealed class DataPage : SettingsPageBase
         _deleteTodo.Content = loc.T("Data.Item.Todo");
         _deleteNote.Content = loc.T("Data.Item.Note");
         _deleteClipboard.Content = loc.T("Data.Item.Clipboard");
+        _deleteWallpaper.Content = loc.T("Data.Item.Wallpaper");
 
         var deleteButton = new Button
         {
@@ -587,7 +593,7 @@ public sealed class DataPage : SettingsPageBase
         {
             var selected = CollectChecked(
                 (_deleteConfig, "config"), (_deleteLauncher, "launcher"), (_deleteTodo, "todo"),
-                (_deleteNote, "note"), (_deleteClipboard, "clipboard"));
+                (_deleteNote, "note"), (_deleteClipboard, "clipboard"), (_deleteWallpaper, "wallpaper"));
             if (selected.Count == 0)
             {
                 await ShowInfo(loc.T("Data.NoSelection"));
@@ -636,6 +642,13 @@ public sealed class DataPage : SettingsPageBase
                 App.Instance.RefreshClipboardWindowView();
             }
 
+            // 必应壁纸数据：重新加载更换记录并刷新窗口（record.json 被删后避免内存缓存写回）
+            if (selected.Contains("wallpaper"))
+            {
+                WallpaperService.Instance.ReloadRecord();
+                App.Instance.RefreshWallpaperWindowView();
+            }
+
             await ShowInfo(loc.T("Data.Delete.Done"));
 
             // 软件配置（设置/语言）在内存里有缓存，立即生效需要重启
@@ -646,7 +659,7 @@ public sealed class DataPage : SettingsPageBase
         };
 
         var content = new StackPanel { Spacing = 4 };
-        content.Children.Add(BuildCheckRow(_deleteConfig, _deleteLauncher, _deleteTodo, _deleteNote, _deleteClipboard));
+        content.Children.Add(BuildCheckRow(_deleteConfig, _deleteLauncher, _deleteTodo, _deleteNote, _deleteClipboard, _deleteWallpaper));
         content.Children.Add(deleteButton);
         MakeCard(FluentGlyphs.Delete, "Data.Delete", "Data.Delete.Sub", content);
     }
@@ -2203,6 +2216,541 @@ public sealed class ClipboardPage : SettingsPageBase
     {
         SettingsService.Instance.Save();
         App.Instance.ApplyClipboardWindowBehavior();
+    }
+}
+
+/// <summary>
+/// 常用工具设置页：窗口行为设置（永远置顶 / 锁定尺寸 / 显示位置）。
+/// 没有独立的数据或监听逻辑，所以没有"启用本功能"卡片。
+/// </summary>
+public sealed class ToolsPage : SettingsPageBase
+{
+    private readonly AppSettings _settings = SettingsService.Instance.Settings;
+
+    public ToolsPage()
+    {
+        BuildTriggerCard();
+        BuildAlwaysOnTopCard();
+        BuildLockSizeCard();
+        BuildShowPositionCard();
+    }
+
+    /// <summary>常用工具"显示和隐藏"卡片：使用快捷键（默认 Alt+5）</summary>
+    private void BuildTriggerCard()
+    {
+        var hotkeyRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        var hotkeyCheck = new CheckBox
+        {
+            Content = LocalizationService.Tr("Settings.Trigger.Hotkey"),
+            IsChecked = _settings.ToolsTriggerHotkey
+        };
+        var hotkeyBox = new TextBox
+        {
+            IsReadOnly = true,
+            Text = _settings.ToolsHotkeyText,
+            MinWidth = 120,
+            PlaceholderText = LocalizationService.Tr("Settings.Trigger.HotkeyHint")
+        };
+
+        void ApplyHotkey()
+        {
+            SettingsService.Instance.Save();
+            App.Instance.RegisterHotkey();
+        }
+        hotkeyCheck.Checked += (_, _) => { _settings.ToolsTriggerHotkey = true; ApplyHotkey(); };
+        hotkeyCheck.Unchecked += (_, _) => { _settings.ToolsTriggerHotkey = false; ApplyHotkey(); };
+
+        // 点击框内后按下键盘组合键自动记录（与待办/随手记/剪贴板快捷键一致的交互）
+        hotkeyBox.GotFocus += (_, _) => hotkeyBox.Text = LocalizationService.Tr("Settings.Trigger.HotkeyRecording");
+        hotkeyBox.KeyDown += (_, e) =>
+        {
+            e.Handled = true;
+            var key = (int)e.Key;
+            // 忽略纯修饰键
+            if (key is (int)Windows.System.VirtualKey.Control or (int)Windows.System.VirtualKey.LeftControl
+                or (int)Windows.System.VirtualKey.RightControl or (int)Windows.System.VirtualKey.Menu
+                or (int)Windows.System.VirtualKey.RightMenu or (int)Windows.System.VirtualKey.Shift
+                or (int)Windows.System.VirtualKey.LeftShift or (int)Windows.System.VirtualKey.RightShift
+                or (int)Windows.System.VirtualKey.LeftWindows or (int)Windows.System.VirtualKey.RightWindows)
+            {
+                return;
+            }
+
+            var modifiers = 0;
+            var modifiersState = Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(Windows.System.VirtualKey.Control);
+            if ((modifiersState & Windows.UI.Core.CoreVirtualKeyStates.Down) != 0) modifiers |= Win32Helper.MOD_CONTROL;
+            modifiersState = Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(Windows.System.VirtualKey.Menu);
+            if ((modifiersState & Windows.UI.Core.CoreVirtualKeyStates.Down) != 0) modifiers |= Win32Helper.MOD_ALT;
+            modifiersState = Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(Windows.System.VirtualKey.Shift);
+            if ((modifiersState & Windows.UI.Core.CoreVirtualKeyStates.Down) != 0) modifiers |= Win32Helper.MOD_SHIFT;
+            modifiersState = Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(Windows.System.VirtualKey.LeftWindows);
+            if ((modifiersState & Windows.UI.Core.CoreVirtualKeyStates.Down) != 0) modifiers |= Win32Helper.MOD_WIN;
+
+            _settings.ToolsHotkeyModifiers = modifiers == 0 ? Win32Helper.MOD_ALT : modifiers;
+            _settings.ToolsHotkeyVirtualKey = key;
+            _settings.ToolsHotkeyText = BuildHotkeyText(modifiers, key);
+            hotkeyBox.Text = _settings.ToolsHotkeyText;
+            ApplyHotkey();
+        };
+        hotkeyRow.Children.Add(hotkeyCheck);
+        hotkeyRow.Children.Add(hotkeyBox);
+
+        MakeCard(FluentGlyphs.Keyboard, "Settings.ToolsTrigger", "Settings.ToolsTrigger.Sub", hotkeyRow);
+    }
+
+    /// <summary>常用工具"永远置顶"卡片（与其他附属功能窗口同款）</summary>
+    private void BuildAlwaysOnTopCard()
+    {
+        var check = new CheckBox { Content = LocalizationService.Tr("Common.Enable"), IsChecked = _settings.ToolsAlwaysOnTop };
+        check.Checked += (_, _) => { _settings.ToolsAlwaysOnTop = true; SaveAndApplyBehavior(); };
+        check.Unchecked += (_, _) => { _settings.ToolsAlwaysOnTop = false; SaveAndApplyBehavior(); };
+        MakeCard(FluentGlyphs.Pin, "Settings.ToolsAlwaysOnTop", "Settings.ToolsAlwaysOnTop.Sub", check);
+    }
+
+    /// <summary>常用工具"锁定尺寸"卡片</summary>
+    private void BuildLockSizeCard()
+    {
+        var check = new CheckBox { Content = LocalizationService.Tr("Common.Enable"), IsChecked = _settings.ToolsLockSize };
+        check.Checked += (_, _) => { _settings.ToolsLockSize = true; SaveAndApplyBehavior(); };
+        check.Unchecked += (_, _) => { _settings.ToolsLockSize = false; SaveAndApplyBehavior(); };
+        MakeCard(FluentGlyphs.Lock, "Settings.ToolsLockSize", "Settings.ToolsLockSize.Sub", check);
+    }
+
+    /// <summary>常用工具"显示位置"卡片（选项复用启动器的显示位置文案）</summary>
+    private void BuildShowPositionCard()
+    {
+        var comboBox = new ComboBox
+        {
+            MinWidth = 200,
+            ItemsSource = new[]
+            {
+                LocalizationService.Tr("Settings.ShowPosition.FollowMouse"),
+                LocalizationService.Tr("Settings.ShowPosition.Center"),
+                LocalizationService.Tr("Settings.ShowPosition.TopLeft"),
+                LocalizationService.Tr("Settings.ShowPosition.TopRight"),
+                LocalizationService.Tr("Settings.ShowPosition.BottomLeft"),
+                LocalizationService.Tr("Settings.ShowPosition.BottomRight"),
+                LocalizationService.Tr("Settings.ShowPosition.LastPosition")
+            },
+            SelectedIndex = (int)_settings.ToolsShowPosition
+        };
+        comboBox.SelectionChanged += (_, _) =>
+        {
+            _settings.ToolsShowPosition = (ShowPosition)comboBox.SelectedIndex;
+            SettingsService.Instance.Save(); // 显示时按此定位
+        };
+        MakeCard(FluentGlyphs.Home, "Settings.ToolsShowPosition", "Settings.ToolsShowPosition.Sub", comboBox);
+    }
+
+    /// <summary>构造快捷键显示文本（如 Alt+5，与剪贴板页同款）</summary>
+    private static string BuildHotkeyText(int modifiers, int vk)
+    {
+        var parts = new List<string>();
+        if ((modifiers & Win32Helper.MOD_CONTROL) != 0) parts.Add("Ctrl");
+        if ((modifiers & Win32Helper.MOD_ALT) != 0) parts.Add("Alt");
+        if ((modifiers & Win32Helper.MOD_SHIFT) != 0) parts.Add("Shift");
+        if ((modifiers & Win32Helper.MOD_WIN) != 0) parts.Add("Win");
+        parts.Add(((Windows.System.VirtualKey)vk).ToString());
+        return string.Join("+", parts);
+    }
+
+    /// <summary>保存并应用常用工具窗口行为（永远置顶 / 锁定尺寸立即生效）</summary>
+    private void SaveAndApplyBehavior()
+    {
+        SettingsService.Instance.Save();
+        App.Instance.ApplyToolsWindowBehavior();
+    }
+}
+
+/// <summary>
+/// 必应每日壁纸设置页：
+/// 壁纸尺寸 / 数据来源 / 数据下载 / 每日自动更换 / 保存壁纸文件到本地 / 壁纸文件保存目录
+/// + 窗口行为（显示和隐藏热键 / 永远置顶 / 锁定尺寸 / 显示位置）。
+/// </summary>
+public sealed class WallpaperPage : SettingsPageBase
+{
+    private readonly AppSettings _settings = SettingsService.Instance.Settings;
+
+    /// <summary>"壁纸文件保存目录"输入框和浏览按钮（随"保存壁纸文件到本地"开关启用/禁用）</summary>
+    private TextBox? _saveDirTextBox;
+    private Button? _saveDirBrowseButton;
+
+    public WallpaperPage()
+    {
+        BuildSizeCard();
+        BuildStyleCard();
+        BuildSourceCard();
+        BuildHostCard();
+        BuildAutoChangeCard();
+        BuildSaveLocalCard();
+        BuildSaveDirCard();
+        BuildTriggerCard();
+        BuildAlwaysOnTopCard();
+        BuildLockSizeCard();
+        BuildShowPositionCard();
+    }
+
+    /// <summary>"壁纸尺寸"卡片：1080P / 4K，默认 1080P（需求）</summary>
+    private void BuildSizeCard()
+    {
+        var comboBox = new ComboBox
+        {
+            MinWidth = 200,
+            ItemsSource = new[]
+            {
+                LocalizationService.Tr("Settings.WallpaperSize.1080P"),
+                LocalizationService.Tr("Settings.WallpaperSize.4K")
+            },
+            SelectedIndex = _settings.WallpaperSize == WallpaperConstants.Size4K ? 1 : 0
+        };
+        comboBox.SelectionChanged += (_, _) =>
+        {
+            _settings.WallpaperSize = comboBox.SelectedIndex == 1
+                ? WallpaperConstants.Size4K
+                : WallpaperConstants.Size1080P;
+            SettingsService.Instance.Save(); // 下次获取/更换壁纸时生效
+        };
+        MakeCard(FluentGlyphs.ZoomIn, "Settings.WallpaperSize", "Settings.WallpaperSize.Sub", comboBox);
+    }
+
+    /// <summary>"模式"卡片：拉伸/适应/填充/平铺/居中/跨区，默认拉伸（需求）</summary>
+    private void BuildStyleCard()
+    {
+        // 下拉框顺序 = 需求给的顺序；取值映射到 WallpaperConstants.Style*
+        var styleValues = new[]
+        {
+            WallpaperConstants.StyleStretch,
+            WallpaperConstants.StyleFit,
+            WallpaperConstants.StyleFill,
+            WallpaperConstants.StyleTile,
+            WallpaperConstants.StyleCenter,
+            WallpaperConstants.StyleSpan
+        };
+        var styleKeys = new[]
+        {
+            "Settings.WallpaperStyle.Stretch",
+            "Settings.WallpaperStyle.Fit",
+            "Settings.WallpaperStyle.Fill",
+            "Settings.WallpaperStyle.Tile",
+            "Settings.WallpaperStyle.Center",
+            "Settings.WallpaperStyle.Span"
+        };
+        var currentIndex = Array.IndexOf(styleValues, _settings.WallpaperStyle);
+
+        var comboBox = new ComboBox
+        {
+            MinWidth = 200,
+            ItemsSource = styleKeys.Select(LocalizationService.Tr).ToArray(),
+            SelectedIndex = currentIndex < 0 ? 0 : currentIndex
+        };
+        comboBox.SelectionChanged += (_, _) =>
+        {
+            if (comboBox.SelectedIndex < 0)
+            {
+                return;
+            }
+            _settings.WallpaperStyle = styleValues[comboBox.SelectedIndex];
+            SettingsService.Instance.Save(); // 下次更换壁纸时生效
+        };
+        MakeCard(FluentGlyphs.Tiles, "Settings.WallpaperStyle", "Settings.WallpaperStyle.Sub", comboBox);
+    }
+
+    /// <summary>"数据来源"卡片：官方 / biturl，默认官方（需求）</summary>
+    private void BuildSourceCard()
+    {
+        var comboBox = new ComboBox
+        {
+            MinWidth = 200,
+            ItemsSource = new[]
+            {
+                LocalizationService.Tr("Settings.WallpaperSource.Official"),
+                LocalizationService.Tr("Settings.WallpaperSource.Biturl")
+            },
+            SelectedIndex = _settings.WallpaperSource == WallpaperConstants.SourceBiturl ? 1 : 0
+        };
+        comboBox.SelectionChanged += (_, _) =>
+        {
+            _settings.WallpaperSource = comboBox.SelectedIndex == 1
+                ? WallpaperConstants.SourceBiturl
+                : WallpaperConstants.SourceOfficial;
+            SettingsService.Instance.Save();
+        };
+        MakeCard(FluentGlyphs.Globe, "Settings.WallpaperSource", "Settings.WallpaperSource.Sub", comboBox);
+    }
+
+    /// <summary>"数据下载"卡片：通用 / 中国 / 全球，默认通用（需求，对应图片直链的域名前缀）</summary>
+    private void BuildHostCard()
+    {
+        var comboBox = new ComboBox
+        {
+            MinWidth = 200,
+            ItemsSource = new[]
+            {
+                LocalizationService.Tr("Settings.WallpaperHost.General"),
+                LocalizationService.Tr("Settings.WallpaperHost.China"),
+                LocalizationService.Tr("Settings.WallpaperHost.Global")
+            },
+            SelectedIndex = _settings.WallpaperDownloadHost switch
+            {
+                WallpaperConstants.HostChina => 1,
+                WallpaperConstants.HostGlobal => 2,
+                _ => 0
+            }
+        };
+        comboBox.SelectionChanged += (_, _) =>
+        {
+            _settings.WallpaperDownloadHost = comboBox.SelectedIndex switch
+            {
+                1 => WallpaperConstants.HostChina,
+                2 => WallpaperConstants.HostGlobal,
+                _ => WallpaperConstants.HostGeneral
+            };
+            SettingsService.Instance.Save();
+        };
+        MakeCard(FluentGlyphs.Download, "Settings.WallpaperHost", "Settings.WallpaperHost.Sub", comboBox);
+    }
+
+    /// <summary>"每日自动更换"卡片：开机自启后自动获取并更换，当天已换过则跳过（需求，默认不勾选）</summary>
+    private void BuildAutoChangeCard()
+    {
+        var check = new CheckBox
+        {
+            Content = LocalizationService.Tr("Common.Enable"),
+            IsChecked = _settings.WallpaperAutoChangeDaily
+        };
+        check.Checked += (_, _) => { _settings.WallpaperAutoChangeDaily = true; SettingsService.Instance.Save(); };
+        check.Unchecked += (_, _) => { _settings.WallpaperAutoChangeDaily = false; SettingsService.Instance.Save(); };
+        MakeCard(FluentGlyphs.Sync, "Settings.WallpaperAutoChange", "Settings.WallpaperAutoChange.Sub", check);
+    }
+
+    /// <summary>"保存壁纸文件到本地"卡片：更换后另存到下方目录（需求，默认不勾选）</summary>
+    private void BuildSaveLocalCard()
+    {
+        var check = new CheckBox
+        {
+            Content = LocalizationService.Tr("Common.Enable"),
+            IsChecked = _settings.WallpaperSaveLocal
+        };
+        check.Checked += (_, _) =>
+        {
+            _settings.WallpaperSaveLocal = true;
+            SettingsService.Instance.Save();
+            UpdateSaveDirEnabled();
+        };
+        check.Unchecked += (_, _) =>
+        {
+            _settings.WallpaperSaveLocal = false;
+            SettingsService.Instance.Save();
+            UpdateSaveDirEnabled();
+        };
+        MakeCard(FluentGlyphs.Save, "Settings.WallpaperSaveLocal", "Settings.WallpaperSaveLocal.Sub", check);
+    }
+
+    /// <summary>
+    /// "壁纸文件保存目录"卡片：输入框 + 浏览按钮，默认 data\wallpaper\image（需求）。
+    /// 只有勾选"保存壁纸文件到本地"后才能修改（需求）。
+    /// </summary>
+    private void BuildSaveDirCard()
+    {
+        _saveDirTextBox = new TextBox
+        {
+            MinWidth = 320,
+            IsReadOnly = false,
+            // 回显实际生效的目录（留空时显示解析后的默认目录）
+            Text = WallpaperService.ResolveSaveDir(_settings.WallpaperSaveDir)
+        };
+        // 失焦时提交：留空 = 恢复默认目录，并把解析后的默认路径回显出来
+        _saveDirTextBox.LostFocus += (_, _) => CommitSaveDir();
+
+        _saveDirBrowseButton = new Button
+        {
+            Content = LocalizationService.Tr("Settings.WallpaperSaveDir.Browse")
+        };
+        _saveDirBrowseButton.Click += BrowseSaveDir_Click;
+
+        var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        row.Children.Add(_saveDirTextBox);
+        row.Children.Add(_saveDirBrowseButton);
+
+        UpdateSaveDirEnabled(); // 按当前开关状态初始化可编辑性
+        MakeCard(FluentGlyphs.Folder, "Settings.WallpaperSaveDir", "Settings.WallpaperSaveDir.Sub", row);
+    }
+
+    /// <summary>提交保存目录（留空回退默认目录并回显实际路径）</summary>
+    private void CommitSaveDir()
+    {
+        if (_saveDirTextBox == null) return;
+        var resolved = WallpaperService.ResolveSaveDir(_saveDirTextBox.Text);
+        _settings.WallpaperSaveDir = _saveDirTextBox.Text.Trim() == "" ? "" : resolved;
+        SettingsService.Instance.Save();
+        _saveDirTextBox.Text = resolved;
+    }
+
+    /// <summary>"浏览..."按钮：系统文件夹选择框（解包应用需挂主窗口句柄）</summary>
+    private async void BrowseSaveDir_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var picker = new Windows.Storage.Pickers.FolderPicker
+            {
+                SuggestedStartLocation = Windows.Storage.Pickers.PickerLocationId.Desktop
+            };
+            picker.FileTypeFilter.Add("*");
+            WinRT.Interop.InitializeWithWindow.Initialize(
+                picker, App.Instance.GetMainWindow().WindowHandle);
+            var folder = await picker.PickSingleFolderAsync();
+            if (folder == null) return; // 用户取消
+
+            _settings.WallpaperSaveDir = folder.Path;
+            SettingsService.Instance.Save();
+            if (_saveDirTextBox != null)
+            {
+                _saveDirTextBox.Text = folder.Path;
+            }
+        }
+        catch
+        {
+            // 文件夹选择失败（极少见）不影响其他功能
+        }
+    }
+
+    /// <summary>"保存壁纸文件到本地"开关变化后，同步目录输入框/浏览按钮的可编辑性（需求）</summary>
+    private void UpdateSaveDirEnabled()
+    {
+        if (_saveDirTextBox != null)
+        {
+            _saveDirTextBox.IsEnabled = _settings.WallpaperSaveLocal;
+        }
+        if (_saveDirBrowseButton != null)
+        {
+            _saveDirBrowseButton.IsEnabled = _settings.WallpaperSaveLocal;
+        }
+    }
+
+    /// <summary>必应壁纸"显示和隐藏"卡片：使用快捷键（默认 Alt+6）</summary>
+    private void BuildTriggerCard()
+    {
+        var hotkeyRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        var hotkeyCheck = new CheckBox
+        {
+            Content = LocalizationService.Tr("Settings.Trigger.Hotkey"),
+            IsChecked = _settings.WallpaperTriggerHotkey
+        };
+        var hotkeyBox = new TextBox
+        {
+            IsReadOnly = true,
+            Text = _settings.WallpaperHotkeyText,
+            MinWidth = 120,
+            PlaceholderText = LocalizationService.Tr("Settings.Trigger.HotkeyHint")
+        };
+
+        void ApplyHotkey()
+        {
+            SettingsService.Instance.Save();
+            App.Instance.RegisterHotkey();
+        }
+        hotkeyCheck.Checked += (_, _) => { _settings.WallpaperTriggerHotkey = true; ApplyHotkey(); };
+        hotkeyCheck.Unchecked += (_, _) => { _settings.WallpaperTriggerHotkey = false; ApplyHotkey(); };
+
+        // 点击框内后按下键盘组合键自动记录（与待办/随手记/剪贴板/常用工具快捷键一致的交互）
+        hotkeyBox.GotFocus += (_, _) => hotkeyBox.Text = LocalizationService.Tr("Settings.Trigger.HotkeyRecording");
+        hotkeyBox.KeyDown += (_, e) =>
+        {
+            e.Handled = true;
+            var key = (int)e.Key;
+            // 忽略纯修饰键
+            if (key is (int)Windows.System.VirtualKey.Control or (int)Windows.System.VirtualKey.LeftControl
+                or (int)Windows.System.VirtualKey.RightControl or (int)Windows.System.VirtualKey.Menu
+                or (int)Windows.System.VirtualKey.RightMenu or (int)Windows.System.VirtualKey.Shift
+                or (int)Windows.System.VirtualKey.LeftShift or (int)Windows.System.VirtualKey.RightShift
+                or (int)Windows.System.VirtualKey.LeftWindows or (int)Windows.System.VirtualKey.RightWindows)
+            {
+                return;
+            }
+
+            var modifiers = 0;
+            var modifiersState = Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(Windows.System.VirtualKey.Control);
+            if ((modifiersState & Windows.UI.Core.CoreVirtualKeyStates.Down) != 0) modifiers |= Win32Helper.MOD_CONTROL;
+            modifiersState = Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(Windows.System.VirtualKey.Menu);
+            if ((modifiersState & Windows.UI.Core.CoreVirtualKeyStates.Down) != 0) modifiers |= Win32Helper.MOD_ALT;
+            modifiersState = Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(Windows.System.VirtualKey.Shift);
+            if ((modifiersState & Windows.UI.Core.CoreVirtualKeyStates.Down) != 0) modifiers |= Win32Helper.MOD_SHIFT;
+            modifiersState = Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(Windows.System.VirtualKey.LeftWindows);
+            if ((modifiersState & Windows.UI.Core.CoreVirtualKeyStates.Down) != 0) modifiers |= Win32Helper.MOD_WIN;
+
+            _settings.WallpaperHotkeyModifiers = modifiers == 0 ? Win32Helper.MOD_ALT : modifiers;
+            _settings.WallpaperHotkeyVirtualKey = key;
+            _settings.WallpaperHotkeyText = BuildHotkeyText(modifiers, key);
+            hotkeyBox.Text = _settings.WallpaperHotkeyText;
+            ApplyHotkey();
+        };
+        hotkeyRow.Children.Add(hotkeyCheck);
+        hotkeyRow.Children.Add(hotkeyBox);
+
+        MakeCard(FluentGlyphs.Keyboard, "Settings.WallpaperTrigger", "Settings.WallpaperTrigger.Sub", hotkeyRow);
+    }
+
+    /// <summary>构造快捷键显示文本（如 Alt+6，与其他附属功能页同款）</summary>
+    private static string BuildHotkeyText(int modifiers, int vk)
+    {
+        var parts = new List<string>();
+        if ((modifiers & Win32Helper.MOD_CONTROL) != 0) parts.Add("Ctrl");
+        if ((modifiers & Win32Helper.MOD_ALT) != 0) parts.Add("Alt");
+        if ((modifiers & Win32Helper.MOD_SHIFT) != 0) parts.Add("Shift");
+        if ((modifiers & Win32Helper.MOD_WIN) != 0) parts.Add("Win");
+        parts.Add(((Windows.System.VirtualKey)vk).ToString());
+        return string.Join("+", parts);
+    }
+
+    /// <summary>必应壁纸"永远置顶"卡片（与其他附属功能窗口同款）</summary>
+    private void BuildAlwaysOnTopCard()
+    {
+        var check = new CheckBox { Content = LocalizationService.Tr("Common.Enable"), IsChecked = _settings.WallpaperAlwaysOnTop };
+        check.Checked += (_, _) => { _settings.WallpaperAlwaysOnTop = true; SaveAndApplyBehavior(); };
+        check.Unchecked += (_, _) => { _settings.WallpaperAlwaysOnTop = false; SaveAndApplyBehavior(); };
+        MakeCard(FluentGlyphs.Pin, "Settings.WallpaperAlwaysOnTop", "Settings.WallpaperAlwaysOnTop.Sub", check);
+    }
+
+    /// <summary>必应壁纸"锁定尺寸"卡片</summary>
+    private void BuildLockSizeCard()
+    {
+        var check = new CheckBox { Content = LocalizationService.Tr("Common.Enable"), IsChecked = _settings.WallpaperLockSize };
+        check.Checked += (_, _) => { _settings.WallpaperLockSize = true; SaveAndApplyBehavior(); };
+        check.Unchecked += (_, _) => { _settings.WallpaperLockSize = false; SaveAndApplyBehavior(); };
+        MakeCard(FluentGlyphs.Lock, "Settings.WallpaperLockSize", "Settings.WallpaperLockSize.Sub", check);
+    }
+
+    /// <summary>必应壁纸"显示位置"卡片（选项复用启动器的显示位置文案）</summary>
+    private void BuildShowPositionCard()
+    {
+        var comboBox = new ComboBox
+        {
+            MinWidth = 200,
+            ItemsSource = new[]
+            {
+                LocalizationService.Tr("Settings.ShowPosition.FollowMouse"),
+                LocalizationService.Tr("Settings.ShowPosition.Center"),
+                LocalizationService.Tr("Settings.ShowPosition.TopLeft"),
+                LocalizationService.Tr("Settings.ShowPosition.TopRight"),
+                LocalizationService.Tr("Settings.ShowPosition.BottomLeft"),
+                LocalizationService.Tr("Settings.ShowPosition.BottomRight"),
+                LocalizationService.Tr("Settings.ShowPosition.LastPosition")
+            },
+            SelectedIndex = (int)_settings.WallpaperShowPosition
+        };
+        comboBox.SelectionChanged += (_, _) =>
+        {
+            _settings.WallpaperShowPosition = (ShowPosition)comboBox.SelectedIndex;
+            SettingsService.Instance.Save(); // 显示时按此定位
+        };
+        MakeCard(FluentGlyphs.Home, "Settings.WallpaperShowPosition", "Settings.WallpaperShowPosition.Sub", comboBox);
+    }
+
+    /// <summary>保存并应用必应壁纸窗口行为（永远置顶 / 锁定尺寸立即生效）</summary>
+    private void SaveAndApplyBehavior()
+    {
+        SettingsService.Instance.Save();
+        App.Instance.ApplyWallpaperWindowBehavior();
     }
 }
 

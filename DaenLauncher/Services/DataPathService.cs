@@ -1,3 +1,5 @@
+using DaenLauncher.Models;
+
 namespace DaenLauncher.Services;
 
 /// <summary>
@@ -36,6 +38,15 @@ public static class DataPathService
     /// <summary>剪贴板数据目录 data\clipboard</summary>
     public static string ClipboardDir => Path.Combine(DataRoot, "clipboard");
 
+    /// <summary>必应壁纸数据目录 data\wallpaper（需求）</summary>
+    public static string WallpaperDir => Path.Combine(DataRoot, "wallpaper");
+
+    /// <summary>壁纸缓存目录 data\wallpaper\cache（下载的壁纸文件：设置桌面壁纸 + 窗口显示用）</summary>
+    public static string WallpaperCacheDir => Path.Combine(WallpaperDir, WallpaperConstants.CacheDirName);
+
+    /// <summary>壁纸默认保存目录 data\wallpaper\image（"保存壁纸文件到本地"的默认位置，需求）</summary>
+    public static string WallpaperImageDir => Path.Combine(WallpaperDir, WallpaperConstants.DefaultImageDirName);
+
     /// <summary>项目图标缓存目录 data\icon\cache</summary>
     public static string IconCacheDir => Path.Combine(IconDir, "cache");
 
@@ -69,7 +80,8 @@ public static class DataPathService
         foreach (var dir in new[]
                  {
                      ConfigDir, LanguageDir, IconSystemDir, IconCacheDir,
-                     LauncherDir, TodoDir, NoteDir, ClipboardDir
+                     LauncherDir, TodoDir, NoteDir, ClipboardDir,
+                     WallpaperDir, WallpaperCacheDir, WallpaperImageDir
                  })
         {
             Directory.CreateDirectory(dir);

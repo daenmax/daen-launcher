@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Window
+    x:Class="DaenLauncher.ToolsWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d">
+
+    <Grid x:Name="RootGrid" Background="{ThemeResource SolidBackgroundFillColorBaseBrush}">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="48" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <!-- ===== 标题栏：图标 + "常用工具"（系统关闭按钮叠在右上角，关闭 = 隐藏） ===== -->
+        <Grid x:Name="AppTitleBar" Grid.Row="0" Background="Transparent" Padding="12,0,0,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="48" />
+            </Grid.ColumnDefinitions>
+
+            <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+                <Image x:Name="TitleBarIcon" Width="20" Height="20" />
+                <TextBlock x:Name="TitleBarText" VerticalAlignment="Center"
+                           FontSize="13" FontWeight="SemiBold"
+                           Style="{ThemeResource CaptionTextBlockStyle}" />
+            </StackPanel>
+        </Grid>
+
+        <!-- ===== 内容区：左分类导航 | 中间工具面板 | 右侧子功能竖导航（全部由代码动态构建） ===== -->
+        <Grid Grid.Row="1" Padding="12,4,12,12">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="180" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="190" />
+            </Grid.ColumnDefinitions>
+
+            <!-- 左侧：分类导航（加解密类/文本处理/格式化/其他常用） -->
+            <ScrollViewer Grid.Column="0" VerticalScrollBarVisibility="Auto">
+                <StackPanel x:Name="CategoryPanel" Spacing="4" Margin="0,4,8,0" />
+            </ScrollViewer>
+
+            <!-- 中间：当前工具的标题 + 面板 -->
+            <Grid Grid.Column="1" Margin="8,4,8,0">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+                <TextBlock x:Name="ToolTitle" Grid.Row="0" FontSize="18" FontWeight="SemiBold"
+                           Margin="0,0,0,10" />
+                <ScrollViewer Grid.Row="1" HorizontalScrollBarVisibility="Disabled"
+                              VerticalScrollBarVisibility="Auto">
+                    <ContentControl x:Name="ToolHost" HorizontalContentAlignment="Stretch" />
+                </ScrollViewer>
+            </Grid>
+
+            <!-- 右侧：当前分类的子功能竖向导航 -->
+            <ScrollViewer Grid.Column="2" VerticalScrollBarVisibility="Auto">
+                <StackPanel x:Name="ToolNavPanel" Spacing="4" Margin="8,4,0,0" />
+            </ScrollViewer>
+        </Grid>
+    </Grid>
+</Window>

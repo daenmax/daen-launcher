@@ -21,7 +21,7 @@
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
     <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
     <DefaultLanguage>zh-CN</DefaultLanguage>
-    <Version>1.0.0</Version>
+    <Version>1.3.1</Version>
   </PropertyGroup>
 
   <ItemGroup>
@@ -29,6 +29,8 @@
     <PackageReference Include="H.NotifyIcon.WinUI" Version="2.5.0-beta.3" />
     <!-- Windows Community Toolkit：WrapPanel 等控件 -->
     <PackageReference Include="CommunityToolkit.WinUI.UI.Controls.Primitives" Version="7.1.2" />
+    <!-- BouncyCastle：SM4 加解密 + AES 的 CFB/OFB/CTR/GCM 模式（.NET 内置 Aes 不支持 OFB/CTR/SM4） -->
+    <PackageReference Include="BouncyCastle.Cryptography" Version="2.5.1" />
   </ItemGroup>
 
   <ItemGroup>

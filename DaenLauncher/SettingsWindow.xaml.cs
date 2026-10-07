@@ -114,6 +114,8 @@ public sealed partial class SettingsWindow : Window
         AddNavItem("Todo", "DaenLauncher.Assets.Icons.待办_64.png");
         AddNavItem("Note", "DaenLauncher.Assets.Icons.随记_64.png");
         AddNavItem("Clipboard", "DaenLauncher.Assets.Icons.剪贴板_64.png");
+        AddNavItem("Tools", "DaenLauncher.Assets.Icons.常用工具_64.png");
+        AddNavItem("Wallpaper", "DaenLauncher.Assets.Icons.必应每日壁纸_64.png");
         AddNavItem("About", "DaenLauncher.Assets.Icons.关于_64.png");
 
         // 默认选中"常规"
@@ -163,6 +165,8 @@ public sealed partial class SettingsWindow : Window
             "Todo" => new TodoPage(),
             "Note" => new NotePage(),
             "Clipboard" => new ClipboardPage(),
+            "Tools" => new ToolsPage(),
+            "Wallpaper" => new WallpaperPage(),
             "About" => new AboutPage(),
             _ => new GeneralPage()
         };

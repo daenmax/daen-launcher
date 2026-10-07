@@ -4,7 +4,8 @@ namespace DaenLauncher.Services;
 
 /// <summary>
 /// 数据导出/导入/删除服务（需求-数据页）。
-/// 数据项定义：软件配置(config、language、icon)、启动器(launcher)、待办(todo)、随手记(note)、剪贴板(clipboard)。
+/// 数据项定义：软件配置(config、language、icon)、启动器(launcher)、待办(todo)、随手记(note)、
+/// 剪贴板(clipboard)、必应壁纸(wallpaper)。
 /// </summary>
 public static class DataService
 {
@@ -15,7 +16,8 @@ public static class DataService
         ("launcher", new[] { "launcher" }),
         ("todo", new[] { "todo" }),
         ("note", new[] { "note" }),
-        ("clipboard", new[] { "clipboard" })
+        ("clipboard", new[] { "clipboard" }),
+        ("wallpaper", new[] { "wallpaper" })
     };
 
     /// <summary>某个数据项的文件夹是否存在于本地</summary>

@@ -298,4 +298,95 @@ public sealed class AppSettings
 
     /// <summary>剪贴板窗口上次位置 Y（物理像素，-1 = 还没记录过）</summary>
     public int ClipboardLastWindowY { get; set; } = -1;
+
+    // ===== 常用工具 =====
+
+    /// <summary>常用工具：使用快捷键 显示/隐藏窗口（默认 Alt+5）</summary>
+    public bool ToolsTriggerHotkey { get; set; } = false;
+
+    /// <summary>常用工具快捷键的修饰键（Win32 MOD_* 组合值）</summary>
+    public int ToolsHotkeyModifiers { get; set; } = 0x0001; // MOD_ALT
+
+    /// <summary>常用工具快捷键的虚拟键码（Win32 VK_*，默认 '5'）</summary>
+    public int ToolsHotkeyVirtualKey { get; set; } = 0x35;
+
+    /// <summary>常用工具快捷键显示文本（仅界面回显，默认 Alt+5）</summary>
+    public string ToolsHotkeyText { get; set; } = "Alt+5";
+
+    /// <summary>常用工具：永远置顶（与其他附属功能窗口一致，默认开）</summary>
+    public bool ToolsAlwaysOnTop { get; set; } = true;
+
+    /// <summary>常用工具：锁定尺寸（窗口不可调整大小）</summary>
+    public bool ToolsLockSize { get; set; } = false;
+
+    /// <summary>常用工具：窗口显示位置（上次位置用 ToolsLastWindowX/Y）</summary>
+    public ShowPosition ToolsShowPosition { get; set; } = ShowPosition.Center;
+
+    /// <summary>常用工具窗口宽度（逻辑像素）</summary>
+    public double ToolsWindowWidth { get; set; } = 1020;
+
+    /// <summary>常用工具窗口高度（逻辑像素）</summary>
+    public double ToolsWindowHeight { get; set; } = 680;
+
+    /// <summary>常用工具窗口上次位置 X（物理像素，-1 = 还没记录过）</summary>
+    public int ToolsLastWindowX { get; set; } = -1;
+
+    /// <summary>常用工具窗口上次位置 Y（物理像素，-1 = 还没记录过）</summary>
+    public int ToolsLastWindowY { get; set; } = -1;
+
+    // ===== 必应每日壁纸 =====
+
+    /// <summary>壁纸尺寸：1080P / 4K（取值见 WallpaperConstants.Size*）</summary>
+    public string WallpaperSize { get; set; } = WallpaperConstants.Size1080P;
+
+    /// <summary>壁纸显示模式：拉伸/适应/填充/平铺/居中/跨区（取值见 WallpaperConstants.Style*，需求默认拉伸）</summary>
+    public string WallpaperStyle { get; set; } = WallpaperConstants.StyleStretch;
+
+    /// <summary>数据来源：官方 / biturl（取值见 WallpaperConstants.Source*）</summary>
+    public string WallpaperSource { get; set; } = WallpaperConstants.SourceOfficial;
+
+    /// <summary>数据下载域名：通用 / 中国 / 全球（取值见 WallpaperConstants.Host*）</summary>
+    public string WallpaperDownloadHost { get; set; } = WallpaperConstants.HostGeneral;
+
+    /// <summary>每日自动更换：开机自启后自动获取今日壁纸并更换（当天已更换过则不再更换，需求）</summary>
+    public bool WallpaperAutoChangeDaily { get; set; } = false;
+
+    /// <summary>保存壁纸文件到本地：每次更换壁纸后把文件另存到 WallpaperSaveDir（需求）</summary>
+    public bool WallpaperSaveLocal { get; set; } = false;
+
+    /// <summary>壁纸文件保存目录；留空 = 默认 data\wallpaper\image（运行时解析，需求默认值）</summary>
+    public string WallpaperSaveDir { get; set; } = "";
+
+    /// <summary>壁纸：使用快捷键 显示/隐藏窗口（默认 Alt+6）</summary>
+    public bool WallpaperTriggerHotkey { get; set; } = false;
+
+    /// <summary>壁纸快捷键的修饰键（Win32 MOD_* 组合值）</summary>
+    public int WallpaperHotkeyModifiers { get; set; } = 0x0001; // MOD_ALT
+
+    /// <summary>壁纸快捷键的虚拟键码（Win32 VK_*，默认 '6'）</summary>
+    public int WallpaperHotkeyVirtualKey { get; set; } = 0x36;
+
+    /// <summary>壁纸快捷键显示文本（仅界面回显，默认 Alt+6）</summary>
+    public string WallpaperHotkeyText { get; set; } = "Alt+6";
+
+    /// <summary>壁纸：永远置顶（与其他附属功能窗口一致，默认开）</summary>
+    public bool WallpaperAlwaysOnTop { get; set; } = true;
+
+    /// <summary>壁纸：锁定尺寸（窗口不可调整大小）</summary>
+    public bool WallpaperLockSize { get; set; } = false;
+
+    /// <summary>壁纸：窗口显示位置（上次位置用 WallpaperLastWindowX/Y）</summary>
+    public ShowPosition WallpaperShowPosition { get; set; } = ShowPosition.Center;
+
+    /// <summary>壁纸窗口宽度（逻辑像素）</summary>
+    public double WallpaperWindowWidth { get; set; } = 960;
+
+    /// <summary>壁纸窗口高度（逻辑像素）</summary>
+    public double WallpaperWindowHeight { get; set; } = 640;
+
+    /// <summary>壁纸窗口上次位置 X（物理像素，-1 = 还没记录过）</summary>
+    public int WallpaperLastWindowX { get; set; } = -1;
+
+    /// <summary>壁纸窗口上次位置 Y（物理像素，-1 = 还没记录过）</summary>
+    public int WallpaperLastWindowY { get; set; } = -1;
 }

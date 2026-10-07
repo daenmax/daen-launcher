@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Window
+    x:Class="DaenLauncher.WallpaperWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d">
+
+    <Grid x:Name="RootGrid" Background="{ThemeResource SolidBackgroundFillColorBaseBrush}">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="48" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <!-- ===== 标题栏：图标 + "必应每日壁纸"（系统关闭按钮叠在右上角，关闭 = 隐藏） ===== -->
+        <Grid x:Name="AppTitleBar" Grid.Row="0" Background="Transparent" Padding="12,0,0,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="48" />
+            </Grid.ColumnDefinitions>
+
+            <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+                <Image x:Name="TitleBarIcon" Width="20" Height="20" />
+                <TextBlock x:Name="TitleBarText" VerticalAlignment="Center"
+                           FontSize="13" FontWeight="SemiBold"
+                           Style="{ThemeResource CaptionTextBlockStyle}" />
+            </StackPanel>
+        </Grid>
+
+        <!-- ===== 内容区：整幅壁纸卡片（圆角大图 + 底部渐变信息条 + 更换按钮） ===== -->
+        <Grid Grid.Row="1" Padding="16,4,16,16">
+            <!-- Grid 自带 CornerRadius：圆角能裁剪内部的大图（Border 的圆角不裁剪子内容，不能用） -->
+            <Grid x:Name="WallpaperCard"
+                  CornerRadius="12"
+                  BorderThickness="1"
+                  BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                  Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
+
+                <!-- 壁纸大图：等比放大铺满卡片，超出部分裁掉（视觉饱满，信息都叠在图上） -->
+                <Image x:Name="WallpaperImage" Stretch="UniformToFill" />
+
+                <!-- 加载中指示 -->
+                <ProgressRing x:Name="LoadingRing" Width="40" Height="40"
+                              HorizontalAlignment="Center" VerticalAlignment="Center"
+                              IsActive="False" />
+
+                <!-- 顶部错误提示条（获取/更换失败时显示，可手动关闭） -->
+                <InfoBar x:Name="ErrorBar" Margin="12,12,12,0" VerticalAlignment="Top"
+                         IsOpen="False" Severity="Error" />
+
+                <!-- 底部渐变遮罩：日期 + 图片描述（copyright）+ "更换壁纸"按钮 -->
+                <Grid VerticalAlignment="Bottom" MinHeight="150">
+                    <Grid.Background>
+                        <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                            <GradientStop Color="#00000000" Offset="0.0" />
+                            <GradientStop Color="#99000000" Offset="0.55" />
+                            <GradientStop Color="#E5000000" Offset="1.0" />
+                        </LinearGradientBrush>
+                    </Grid.Background>
+                    <Grid Padding="20,0,20,14">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="*" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+
+                        <!-- 更换按钮（强调色，悬停图上很醒目） -->
+                        <Button x:Name="ApplyButton" Grid.Row="0" Style="{ThemeResource AccentButtonStyle}"
+                                HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                                Margin="0,0,0,12"
+                                Click="ApplyButton_Click">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <FontIcon Glyph="&#xE895;" FontSize="14" />
+                                <TextBlock x:Name="ApplyButtonText" />
+                            </StackPanel>
+                        </Button>
+
+                        <!-- 日期（大字）+ 图片描述（小字，最多两行） -->
+                        <StackPanel Grid.Row="1" VerticalAlignment="Bottom" Spacing="4">
+                            <TextBlock x:Name="DateText" Foreground="White"
+                                       FontSize="20" FontWeight="SemiBold" />
+                            <TextBlock x:Name="CopyrightText" Foreground="#E6FFFFFF" FontSize="12"
+                                       TextWrapping="Wrap" MaxLines="2"
+                                       TextTrimming="CharacterEllipsis" />
+                        </StackPanel>
+                    </Grid>
+                </Grid>
+            </Grid>
+        </Grid>
+    </Grid>
+</Window>

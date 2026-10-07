@@ -18,12 +18,20 @@ public static class AuxiliaryFeatures
     /// <summary>剪贴板功能 id</summary>
     public const string ClipboardId = "clipboard";
 
+    /// <summary>常用工具功能 id</summary>
+    public const string ToolsId = "tools";
+
+    /// <summary>必应壁纸功能 id</summary>
+    public const string WallpaperId = "wallpaper";
+
     /// <summary>全部附属功能（数组顺序 = 默认显示顺序）</summary>
     public static readonly AuxiliaryFeature[] All =
     [
         new(TodoId, "Main.Todo", "DaenLauncher.Assets.Icons.待办_64.png"),
         new("note", "Main.Note", "DaenLauncher.Assets.Icons.随记_64.png"),
         new("clipboard", "Main.Clipboard", "DaenLauncher.Assets.Icons.剪贴板_64.png"),
+        new(ToolsId, "Main.Tools", "DaenLauncher.Assets.Icons.常用工具_64.png"),
+        new(WallpaperId, "Main.Wallpaper", "DaenLauncher.Assets.Icons.必应每日壁纸_64.png"),
     ];
 
     /// <summary>底栏最多直接显示的个数（其余通过"更多"菜单访问，需求）</summary>

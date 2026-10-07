@@ -116,6 +116,12 @@ public static class Win32Helper
     /// <summary>热键回调：剪贴板窗口热键（id=4）触发</summary>
     public static event Action? ClipboardHotkeyPressed;
 
+    /// <summary>热键回调：常用工具窗口热键（id=5）触发</summary>
+    public static event Action? ToolsHotkeyPressed;
+
+    /// <summary>热键回调：必应壁纸窗口热键（id=6）触发</summary>
+    public static event Action? WallpaperHotkeyPressed;
+
     /// <summary>热键 id：主窗口 显示/隐藏</summary>
     public const int HotkeyIdMain = 1;
 
@@ -128,6 +134,11 @@ public static class Win32Helper
     /// <summary>热键 id：剪贴板窗口 显示/隐藏</summary>
     public const int HotkeyIdClipboard = 4;
 
+    /// <summary>热键 id：常用工具窗口 显示/隐藏</summary>
+    public const int HotkeyIdTools = 5;
+
+    /// <summary>热键 id：必应壁纸窗口 显示/隐藏</summary>
+    public const int HotkeyIdWallpaper = 6;
     private static readonly Dictionary<long, SUBCLASSPROC> SubclassProcs = new();
     private static long _nextSubclassId = 1;
 
@@ -194,6 +205,12 @@ public static class Win32Helper
                     break;
                 case HotkeyIdClipboard:
                     ClipboardHotkeyPressed?.Invoke();
+                    break;
+                case HotkeyIdTools:
+                    ToolsHotkeyPressed?.Invoke();
+                    break;
+                case HotkeyIdWallpaper:
+                    WallpaperHotkeyPressed?.Invoke();
                     break;
                 default:
                     HotkeyPressed?.Invoke();

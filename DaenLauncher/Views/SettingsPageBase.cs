@@ -135,6 +135,7 @@ public static class FluentGlyphs
     public const string Lock = "\uE72E";         // 锁：锁定
     public const string Play = "\uE768";         // 播放：启动方式
     public const string Sync = "\uE895";         // 循环箭头：启动后行为/更新
+    public const string Download = "\uE896";     // 下载：壁纸数据下载
     public const string ZoomIn = "\uE8A3";       // 放大镜：显示大小
     public const string AllApps = "\uE71D";      // 磁贴：布局
     public const string Tiles = "\uE80A";        // 网格：子分类风格
