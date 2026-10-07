@@ -48,10 +48,10 @@ public static class LauncherRunner
 
                 case LauncherItemType.Uwp:
                     // UWP 应用通过 shell:AppsFolder\<应用ID> 启动
-                    var appId = path.StartsWith("shell:AppsFolder\\", StringComparison.OrdinalIgnoreCase)
-                        ? path["shell:AppsFolder\\".Length..]
+                    var appId = path.StartsWith(LauncherItemPaths.UwpPrefix, StringComparison.OrdinalIgnoreCase)
+                        ? path[LauncherItemPaths.UwpPrefix.Length..]
                         : path;
-                    psi.FileName = $"shell:AppsFolder\\{appId}";
+                    psi.FileName = $"{LauncherItemPaths.UwpPrefix}{appId}";
                     break;
 
                 default:

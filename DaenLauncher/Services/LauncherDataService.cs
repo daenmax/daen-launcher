@@ -18,6 +18,12 @@ public sealed class LauncherDataService
         _store = new JsonStore<LauncherData>(Path.Combine(DataPathService.LauncherDir, "launcher.json"));
         Data = _store.Load();
 
+        // 兼容旧数据修正（第五十四轮）：有修改就立即落盘
+        if (NormalizeLegacyUrlTypes())
+        {
+            Save();
+        }
+
         // 首次启动：创建默认分类和默认子分类
         if (Data.Categories.Count == 0)
         {
@@ -42,6 +48,12 @@ public sealed class LauncherDataService
     {
         _store.Reload();
         Data = _store.Load();
+
+        if (NormalizeLegacyUrlTypes())
+        {
+            Save();
+        }
+
         if (Data.Categories.Count == 0)
         {
             var sub = new LauncherSubCategory { Name = LocalizationService.Tr("Main.DefaultSubCategory") };
@@ -53,6 +65,34 @@ public sealed class LauncherDataService
             Data.Categories.Add(category);
             Save();
         }
+    }
+
+    /// <summary>
+    /// 旧数据修正：第五十四轮之前从 .url 文件（Steam 游戏桌面快捷方式）拖入的项目
+    /// 一律被标为"网址"类型，但 steam:// 这类地址抓不到 favicon、图标永远是占位——
+    /// 地址不是 http/https 的统一修正为"协议"类型（启动方式相同，图标走协议逻辑）。
+    /// 返回是否有修改。
+    /// </summary>
+    private bool NormalizeLegacyUrlTypes()
+    {
+        var changed = false;
+        foreach (var category in Data.Categories)
+        {
+            foreach (var sub in category.SubCategories)
+            {
+                foreach (var item in sub.Items)
+                {
+                    if (item.Type == LauncherItemType.Url &&
+                        !item.Path.StartsWith("http://", StringComparison.OrdinalIgnoreCase) &&
+                        !item.Path.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+                    {
+                        item.Type = LauncherItemType.Protocol;
+                        changed = true;
+                    }
+                }
+            }
+        }
+        return changed;
     }
 
     /// <summary>导出数据的目录列表（数据页勾选项）</summary>

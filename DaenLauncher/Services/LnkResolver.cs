@@ -195,4 +195,42 @@ public static class LnkResolver
         }
         return null;
     }
+
+    /// <summary>
+    /// 解析 .url（InternetShortcut）文件的完整声明：URL 地址 + 图标文件声明。
+    /// Steam 游戏的桌面快捷方式就是 .url，IconFile 指向该游戏的专属图标
+    /// （如 steam\games\xxx.ico），拖入时记录下来可以让项目显示游戏自己的图标。
+    /// </summary>
+    public static (string? Url, string? IconFile, int IconIndex) ReadInternetShortcut(string filePath)
+    {
+        string? url = null;
+        string? iconFile = null;
+        var iconIndex = 0;
+        try
+        {
+            foreach (var line in File.ReadAllLines(filePath))
+            {
+                var trimmed = line.Trim();
+                if (trimmed.StartsWith("URL=", StringComparison.OrdinalIgnoreCase) && url == null)
+                {
+                    var value = trimmed[4..].Trim();
+                    if (!string.IsNullOrWhiteSpace(value)) url = value;
+                }
+                else if (trimmed.StartsWith("IconFile=", StringComparison.OrdinalIgnoreCase))
+                {
+                    var value = trimmed[9..].Trim();
+                    if (!string.IsNullOrWhiteSpace(value)) iconFile = value;
+                }
+                else if (trimmed.StartsWith("IconIndex=", StringComparison.OrdinalIgnoreCase))
+                {
+                    int.TryParse(trimmed[10..].Trim(), out iconIndex);
+                }
+            }
+        }
+        catch
+        {
+            // 读取失败返回已解析到的部分
+        }
+        return (url, iconFile, iconIndex);
+    }
 }

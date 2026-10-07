@@ -17,6 +17,7 @@ public sealed class GeneralPage : SettingsPageBase
         BuildLanguageCard();
         BuildAutoStartCard();
         BuildStartBehaviorCard();
+        BuildProxyCard();
         BuildAuxiliaryCard();
     }
 
@@ -270,6 +271,183 @@ public sealed class GeneralPage : SettingsPageBase
             SettingsService.Instance.Save();
         };
         MakeCard(FluentGlyphs.RedEye, "Settings.StartBehavior", "Settings.StartBehavior.Sub", comboBox);
+    }
+
+    /// <summary>网络代理卡片（需求）：软件内所有联网功能统一遵循此配置。
+    /// 模式下拉框切换立即保存；HTTP/SOCKS5 模式下显示地址/端口/用户名/密码，
+    /// 必须"测试代理"通过后才能点"保存代理"。</summary>
+    private void BuildProxyCard()
+    {
+        var content = new StackPanel { Spacing = 10 };
+
+        // ===== 代理模式下拉框 =====
+        var modeCombo = new ComboBox
+        {
+            MinWidth = 220,
+            ItemsSource = new[]
+            {
+                LocalizationService.Tr("Settings.Proxy.ModeNone"),
+                LocalizationService.Tr("Settings.Proxy.ModeSystem"),
+                LocalizationService.Tr("Settings.Proxy.ModeHttp"),
+                LocalizationService.Tr("Settings.Proxy.ModeSocks5")
+            },
+            // 防脏数据：存档值超出范围时回退"使用系统代理设置"
+            SelectedIndex = Enum.IsDefined(typeof(ProxyMode), _settings.ProxyMode)
+                ? (int)_settings.ProxyMode
+                : (int)ProxyMode.System
+        };
+
+        // ===== 明细输入区（仅 HTTP/SOCKS5 模式显示）=====
+        var hostBox = new TextBox
+        {
+            PlaceholderText = LocalizationService.Tr("Settings.Proxy.HostPlaceholder"),
+            Text = _settings.ProxyHost,
+            MinWidth = 200
+        };
+        var portBox = new TextBox
+        {
+            PlaceholderText = LocalizationService.Tr("Settings.Proxy.PortPlaceholder"),
+            Text = _settings.ProxyPort > 0 ? _settings.ProxyPort.ToString() : "",
+            MinWidth = 90
+        };
+        var userBox = new TextBox
+        {
+            PlaceholderText = LocalizationService.Tr("Settings.Proxy.UsernamePlaceholder"),
+            Text = _settings.ProxyUsername,
+            MinWidth = 160
+        };
+        var passBox = new TextBox
+        {
+            // 与 webnote 密码一致：明文显示/存储（本机 settings.json）
+            PlaceholderText = LocalizationService.Tr("Settings.Proxy.PasswordPlaceholder"),
+            Text = _settings.ProxyPassword,
+            MinWidth = 160
+        };
+
+        var resultText = new TextBlock
+        {
+            FontSize = 12,
+            TextWrapping = TextWrapping.Wrap,
+            VerticalAlignment = VerticalAlignment.Center,
+            Visibility = Visibility.Collapsed
+        };
+        var testButton = new Button { Content = LocalizationService.Tr("Settings.Proxy.Test") };
+        var saveButton = new Button { Content = LocalizationService.Tr("Settings.Proxy.Save"), IsEnabled = false };
+
+        // 带标签的输入行（标签在上，输入框在下）
+        StackPanel Field(string labelKey, FrameworkElement input)
+        {
+            var panel = new StackPanel { Spacing = 4 };
+            panel.Children.Add(new TextBlock
+            {
+                Text = LocalizationService.Tr(labelKey),
+                FontSize = 12,
+                Opacity = 0.8
+            });
+            panel.Children.Add(input);
+            return panel;
+        }
+
+        var detailPanel = new StackPanel { Spacing = 8, Margin = new Thickness(0, 2, 0, 0) };
+        var row1 = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
+        row1.Children.Add(Field("Settings.Proxy.Host", hostBox));
+        row1.Children.Add(Field("Settings.Proxy.Port", portBox));
+        var row2 = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
+        row2.Children.Add(Field("Settings.Proxy.Username", userBox));
+        row2.Children.Add(Field("Settings.Proxy.Password", passBox));
+        var buttonRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        buttonRow.Children.Add(testButton);
+        buttonRow.Children.Add(saveButton);
+        buttonRow.Children.Add(resultText);
+        detailPanel.Children.Add(row1);
+        detailPanel.Children.Add(row2);
+        detailPanel.Children.Add(buttonRow);
+
+        // HTTP/SOCKS5 时显示明细区
+        void UpdateDetailVisibility()
+        {
+            detailPanel.Visibility = _settings.ProxyMode is ProxyMode.Http or ProxyMode.Socks5
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+        }
+        UpdateDetailVisibility();
+
+        // 测试结果展示：null = 中性（测试中），true 绿色，false 红色
+        void ShowResult(string message, bool? ok)
+        {
+            resultText.Text = message;
+            resultText.Foreground = ok == null
+                ? (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["TextFillColorSecondaryBrush"]
+                : new SolidColorBrush(ok.Value ? Microsoft.UI.Colors.Green : Microsoft.UI.Colors.OrangeRed);
+            resultText.Visibility = Visibility.Visible;
+        }
+
+        // 任一字段修改后，之前的测试结果作废：必须重新测试才能保存
+        void InvalidateTest()
+        {
+            saveButton.IsEnabled = false;
+            resultText.Visibility = Visibility.Collapsed;
+        }
+        hostBox.TextChanged += (_, _) => InvalidateTest();
+        portBox.TextChanged += (_, _) => InvalidateTest();
+        userBox.TextChanged += (_, _) => InvalidateTest();
+        passBox.TextChanged += (_, _) => InvalidateTest();
+
+        // 模式切换：立即保存（与其他设置一致）
+        modeCombo.SelectionChanged += (_, _) =>
+        {
+            _settings.ProxyMode = (ProxyMode)Math.Clamp(modeCombo.SelectedIndex, 0, 3);
+            SettingsService.Instance.Save();
+            UpdateDetailVisibility();
+            InvalidateTest();
+        };
+
+        // 测试代理：用界面上当前填写的值发真实请求（不依赖已保存的配置）
+        testButton.Click += async (_, _) =>
+        {
+            var host = hostBox.Text.Trim();
+            if (host.Length == 0 ||
+                !int.TryParse(portBox.Text.Trim(), out var port) ||
+                port < 1 || port > 65535)
+            {
+                ShowResult(LocalizationService.Tr("Settings.Proxy.HostInvalid"), false);
+                saveButton.IsEnabled = false;
+                return;
+            }
+
+            testButton.IsEnabled = false;
+            ShowResult(LocalizationService.Tr("Settings.Proxy.Testing"), null);
+            var (ok, message) = await ProxyService.TestProxyAsync(
+                _settings.ProxyMode, host, port, userBox.Text, passBox.Text);
+            testButton.IsEnabled = true;
+
+            if (ok)
+            {
+                ShowResult(LocalizationService.Tr("Settings.Proxy.TestOk"), true);
+                saveButton.IsEnabled = true; // 测试通过才允许保存（需求）
+            }
+            else
+            {
+                ShowResult(string.Format(LocalizationService.Tr("Settings.Proxy.TestFailed"), message), false);
+                saveButton.IsEnabled = false;
+            }
+        };
+
+        // 保存代理：把测试通过的值写入配置（立即全局生效，无需重启）
+        saveButton.Click += (_, _) =>
+        {
+            _settings.ProxyHost = hostBox.Text.Trim();
+            _settings.ProxyPort = int.Parse(portBox.Text.Trim());
+            _settings.ProxyUsername = userBox.Text;
+            _settings.ProxyPassword = passBox.Text;
+            SettingsService.Instance.Save();
+            ShowResult(LocalizationService.Tr("Settings.Proxy.Saved"), true);
+            saveButton.IsEnabled = false;
+        };
+
+        content.Children.Add(modeCombo);
+        content.Children.Add(detailPanel);
+        MakeCard(FluentGlyphs.Globe, "Settings.Proxy", "Settings.Proxy.Sub", content);
     }
 }
 
@@ -1203,10 +1381,11 @@ public sealed class LauncherPage : SettingsPageBase
             _settings.CategoryTextSize = 14;
             _settings.SubCategoryIconSize = 18;
             _settings.SubCategoryTextSize = 14;
-            _settings.ItemIconSize = 40;
-            _settings.ItemTextSize = 12;
+            // 项目图标/文字/横向间距默认值与 AppSettings 的常量保持一致（需求）
+            _settings.ItemIconSize = AppSettings.DefaultItemIconSize;
+            _settings.ItemTextSize = AppSettings.DefaultItemTextSize;
             _settings.ItemTextMaxLines = 1;
-            _settings.ItemHorizontalSpacing = 8;
+            _settings.ItemHorizontalSpacing = AppSettings.DefaultItemHorizontalSpacing;
             _settings.ItemVerticalSpacing = 8;
             SaveAndRefreshPanelOnly();
             SettingsWindow.CurrentInstance?.RebuildCurrentPage();

@@ -19,6 +19,23 @@ public sealed class AppSettings
     /// <summary>开机自启方式</summary>
     public AutoStartMode AutoStartMode { get; set; } = AutoStartMode.Registry;
 
+    // ===== 常规：网络代理（软件内所有联网功能统一遵循，需求） =====
+
+    /// <summary>代理模式（默认使用系统代理设置）</summary>
+    public ProxyMode ProxyMode { get; set; } = ProxyMode.System;
+
+    /// <summary>代理服务器地址（HTTP/SOCKS5 模式用，如 127.0.0.1）</summary>
+    public string ProxyHost { get; set; } = "";
+
+    /// <summary>代理服务器端口（0 = 未设置）</summary>
+    public int ProxyPort { get; set; } = 0;
+
+    /// <summary>代理用户名（可选，留空 = 无认证）</summary>
+    public string ProxyUsername { get; set; } = "";
+
+    /// <summary>代理密码（可选；与 webnote 密码一致，明文存于本机 settings.json）</summary>
+    public string ProxyPassword { get; set; } = "";
+
     /// <summary>软件启动后：显示 或 隐藏</summary>
     public StartBehavior StartBehavior { get; set; } = StartBehavior.Show;
 
@@ -114,11 +131,22 @@ public sealed class AppSettings
     /// <summary>项目布局：平铺/列表</summary>
     public ItemLayoutMode ItemLayout { get; set; } = ItemLayoutMode.Grid;
 
+    // ===== 项目显示大小默认值（设置页"恢复默认"按钮与此保持一致，需求） =====
+
+    /// <summary>项目图标大小默认值</summary>
+    public const double DefaultItemIconSize = 32;
+
+    /// <summary>项目文字大小默认值</summary>
+    public const double DefaultItemTextSize = 14;
+
+    /// <summary>项目横向间距默认值</summary>
+    public const double DefaultItemHorizontalSpacing = 12;
+
     /// <summary>项目图标大小（0 = 不显示图标）</summary>
-    public double ItemIconSize { get; set; } = 40;
+    public double ItemIconSize { get; set; } = DefaultItemIconSize;
 
     /// <summary>项目文字大小（0 = 不显示文字）</summary>
-    public double ItemTextSize { get; set; } = 12;
+    public double ItemTextSize { get; set; } = DefaultItemTextSize;
 
     /// <summary>项目文字最多显示行数（1-3 行，超出省略号）</summary>
     public int ItemTextMaxLines { get; set; } = 1;
@@ -128,7 +156,7 @@ public sealed class AppSettings
     public ItemHorizontalAlignment ItemContentAlignment { get; set; } = ItemHorizontalAlignment.Center;
 
     /// <summary>项目之间的横向间距（总像素，平铺和列表通用）</summary>
-    public double ItemHorizontalSpacing { get; set; } = 8;
+    public double ItemHorizontalSpacing { get; set; } = DefaultItemHorizontalSpacing;
 
     /// <summary>项目之间的纵向间距（总像素，平铺和列表通用）</summary>
     public double ItemVerticalSpacing { get; set; } = 8;

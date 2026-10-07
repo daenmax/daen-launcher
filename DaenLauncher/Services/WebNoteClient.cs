@@ -40,8 +40,8 @@ public static class WebNoteClient
     private const string UserAgent =
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36";
 
-    /// <summary>共享 HttpClient（进程内复用连接池）</summary>
-    private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(15) };
+    /// <summary>HttpClient（统一走代理配置，需求；ProxyService 共享连接池，配置变化立即生效）</summary>
+    private static HttpClient Http => ProxyService.CreateHttpClient(TimeSpan.FromSeconds(15));
 
     /// <summary>获取便签信息的结果</summary>
     public sealed class FetchResult

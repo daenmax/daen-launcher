@@ -5,6 +5,7 @@ using DaenLauncher.Services;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
+using System.Runtime.InteropServices.WindowsRuntime;
 
 namespace DaenLauncher.Dialogs;
 
@@ -286,6 +287,237 @@ public static class Dialogs
         return true;
     }
 
+    /// <summary>
+    /// 输入地址创建项目的弹窗（网址 / 协议共用，需求：添加项目）。
+    /// 带实时校验：网址必须 http/https 开头；协议必须是 scheme: 形式（如 steam://rungameid/993090）。
+    /// 返回新项目，取消返回 null。
+    /// </summary>
+    public static async Task<LauncherItem?> TextItemDialogAsync(XamlRoot xamlRoot, LauncherItemType type)
+    {
+        var isUrl = type == LauncherItemType.Url;
+        var loc = LocalizationService.Instance;
+
+        var pathBox = new TextBox
+        {
+            PlaceholderText = loc.T(isUrl ? "Dialog.ItemUrl" : "Dialog.ItemProtocol")
+        };
+        var nameBox = new TextBox { PlaceholderText = loc.T("Dialog.ItemName") };
+        var hintText = new TextBlock
+        {
+            Text = loc.T(isUrl ? "Dialog.UrlInvalid" : "Dialog.ProtocolInvalid"),
+            FontSize = 12,
+            TextWrapping = TextWrapping.Wrap,
+            Foreground = new SolidColorBrush(Microsoft.UI.Colors.OrangeRed),
+            Visibility = Visibility.Collapsed
+        };
+
+        var content = new StackPanel { Spacing = 10 };
+        content.Children.Add(pathBox);
+        content.Children.Add(nameBox);
+        content.Children.Add(hintText);
+
+        var dialog = new ContentDialog
+        {
+            XamlRoot = xamlRoot,
+            Title = loc.T(isUrl ? "Main.Item.Add.Url" : "Main.Item.Add.Protocol"),
+            Content = content,
+            PrimaryButtonText = loc.T("Dialog.Save"),
+            CloseButtonText = loc.T("Dialog.Cancel"),
+            DefaultButton = ContentDialogButton.Primary,
+            // 地址合法才允许保存
+            IsPrimaryButtonEnabled = false
+        };
+
+        // 名称是否被用户手动填过：没填过时根据地址自动填充
+        var nameEdited = false;
+        nameBox.TextChanged += (_, _) => nameEdited = nameBox.Text.Length > 0;
+
+        pathBox.TextChanged += (_, _) =>
+        {
+            var text = pathBox.Text.Trim();
+            var valid = IsTextItemValid(text, isUrl);
+            hintText.Visibility = !valid && text.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+            dialog.IsPrimaryButtonEnabled = valid;
+
+            // 网址：名称没手动填过时用主机名自动填充（www.example.com → www.example.com）
+            if (isUrl && !nameEdited && Uri.TryCreate(text, UriKind.Absolute, out var uri))
+            {
+                nameBox.Text = uri.Host;
+            }
+        };
+
+        var result = await dialog.ShowAsync();
+        if (result != ContentDialogResult.Primary) return null;
+
+        var path = pathBox.Text.Trim();
+        var name = nameBox.Text.Trim();
+        if (string.IsNullOrEmpty(name))
+        {
+            // 名称留空：网址用主机名，协议用地址本身
+            if (isUrl && Uri.TryCreate(path, UriKind.Absolute, out var uri)) name = uri.Host;
+            else name = path;
+        }
+        return new LauncherItem { Name = name, Path = path, Type = type };
+    }
+
+    /// <summary>网址/协议地址校验</summary>
+    private static bool IsTextItemValid(string text, bool isUrl)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return false;
+
+        if (isUrl)
+        {
+            return Uri.TryCreate(text, UriKind.Absolute, out var uri)
+                   && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps)
+                   && !string.IsNullOrEmpty(uri.Host);
+        }
+
+        // 协议：scheme 以字母开头，可含 数字/+/-.，后跟冒号（如 steam://、ms-settings:）
+        var match = System.Text.RegularExpressions.Regex.Match(text, ProtocolPattern);
+        if (!match.Success) return false;
+        var scheme = match.Value.TrimEnd(':').ToLowerInvariant();
+        // http/https 属于"网址"类型，不算协议
+        return scheme != Uri.UriSchemeHttp && scheme != Uri.UriSchemeHttps;
+    }
+
+    /// <summary>协议地址格式（scheme: 形式，如 steam://rungameid/993090、ms-settings:）</summary>
+    private const string ProtocolPattern = @"^[a-zA-Z][a-zA-Z0-9+.\-]*:";
+
+    /// <summary>
+    /// UWP 应用选择弹窗（需求：添加项目-UWP 应用，列出系统安装的微软商店应用）。
+    /// 支持按名称/应用ID 搜索。返回新项目，取消返回 null。
+    /// </summary>
+    public static async Task<LauncherItem?> UwpAppPickerDialogAsync(XamlRoot xamlRoot)
+    {
+        var loc = LocalizationService.Instance;
+
+        List<InstalledAppService.InstalledUwpApp> apps;
+        try
+        {
+            apps = await InstalledAppService.GetInstalledAppsAsync();
+        }
+        catch
+        {
+            apps = new List<InstalledAppService.InstalledUwpApp>();
+        }
+
+        var searchBox = new TextBox { PlaceholderText = loc.T("Main.UwpPicker.Search") };
+
+        // 列表行：应用名 + 应用ID（AUMID）；运行时加载的 DataTemplate 用经典 Binding 反射取值
+        var list = new ListView
+        {
+            MaxHeight = 380,
+            SelectionMode = ListViewSelectionMode.Single,
+            Margin = new Thickness(0, 8, 0, 0),
+            ItemTemplate = (DataTemplate)Microsoft.UI.Xaml.Markup.XamlReader.Load(UwpRowTemplateXaml)
+        };
+        var emptyText = new TextBlock
+        {
+            Text = loc.T("Main.UwpPicker.Empty"),
+            Opacity = 0.7,
+            Margin = new Thickness(0, 8, 0, 0),
+            Visibility = Visibility.Collapsed
+        };
+
+        void Refill()
+        {
+            var keyword = searchBox.Text?.Trim() ?? "";
+            var filtered = string.IsNullOrEmpty(keyword)
+                ? apps
+                : apps.Where(a => a.Name.Contains(keyword, StringComparison.OrdinalIgnoreCase)
+                                  || a.Aumid.Contains(keyword, StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+            list.ItemsSource = filtered;
+            emptyText.Visibility = filtered.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        }
+        searchBox.TextChanged += (_, _) => Refill();
+        Refill();
+
+        // 后台逐个加载应用图标（按 AUMID 磁盘缓存，首次需要 Shell 提取），加载完一个刷新一行。
+        // 此时还在 UI 线程上，取到当前线程的 DispatcherQueue 供后台加载完成后切回来
+        var dispatcherQueue = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread();
+        _ = LoadUwpAppIconsAsync(apps, dispatcherQueue);
+
+        var content = new StackPanel { Spacing = 8 };
+        content.Children.Add(searchBox);
+        content.Children.Add(list);
+        content.Children.Add(emptyText);
+
+        var dialog = new ContentDialog
+        {
+            XamlRoot = xamlRoot,
+            Title = loc.T("Main.Item.Add.Uwp"),
+            Content = content,
+            PrimaryButtonText = loc.T("Dialog.Save"),
+            CloseButtonText = loc.T("Dialog.Cancel"),
+            DefaultButton = ContentDialogButton.Primary,
+            // 选中一个应用才允许保存
+            IsPrimaryButtonEnabled = false
+        };
+        list.SelectionChanged += (_, _) => dialog.IsPrimaryButtonEnabled = list.SelectedItem != null;
+
+        var result = await dialog.ShowAsync();
+        if (result != ContentDialogResult.Primary ||
+            list.SelectedItem is not InstalledAppService.InstalledUwpApp selected)
+        {
+            return null;
+        }
+        return new LauncherItem
+        {
+            Name = selected.Name,
+            Path = LauncherItemPaths.UwpPrefix + selected.Aumid,
+            Type = LauncherItemType.Uwp
+        };
+    }
+
+    /// <summary>UWP 选择弹窗列表行的模板（图标 + 应用名 + 应用ID 两行）</summary>
+    private const string UwpRowTemplateXaml =
+        "<DataTemplate xmlns=\"http://schemas.microsoft.com/winfx/2006/xaml/presentation\">" +
+        "<StackPanel Orientation=\"Horizontal\" Margin=\"2,4\" Spacing=\"10\">" +
+        "<Image Source=\"{Binding IconSource}\" Width=\"32\" Height=\"32\" VerticalAlignment=\"Center\"/>" +
+        "<StackPanel Spacing=\"2\" VerticalAlignment=\"Center\">" +
+        "<TextBlock Text=\"{Binding Name}\" TextTrimming=\"CharacterEllipsis\"/>" +
+        "<TextBlock Text=\"{Binding Aumid}\" FontSize=\"11\" Opacity=\"0.6\" TextTrimming=\"CharacterEllipsis\"/>" +
+        "</StackPanel></StackPanel></DataTemplate>";
+
+    /// <summary>后台逐个加载 UWP 应用图标（顺序执行，避免几十个并发提取拖慢系统），
+    /// 每加载完一个就切回 UI 线程设置 IconSource（BitmapImage 有线程亲和性，必须在 UI 线程创建）</summary>
+    private static async Task LoadUwpAppIconsAsync(
+        List<InstalledAppService.InstalledUwpApp> apps,
+        Microsoft.UI.Dispatching.DispatcherQueue dispatcherQueue)
+    {
+        foreach (var app in apps)
+        {
+            if (app.IconSource != null) continue; // 搜索过滤共用同一批对象，已加载的不重复加载
+            try
+            {
+                var png = await ItemIconService.GetUwpAppIconPngBytesAsync(app.Aumid);
+                if (png == null) continue;
+                dispatcherQueue.TryEnqueue(() => _ = SetUwpAppIconAsync(app, png));
+            }
+            catch
+            {
+                // 单个图标加载失败不影响其他应用
+            }
+        }
+    }
+
+    /// <summary>在 UI 线程把 PNG 字节解码成 BitmapImage 并设置到应用行</summary>
+    private static async Task SetUwpAppIconAsync(InstalledAppService.InstalledUwpApp app, byte[] png)
+    {
+        try
+        {
+            var bitmap = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage();
+            using var stream = new MemoryStream(png);
+            await bitmap.SetSourceAsync(stream.AsRandomAccessStream());
+            app.IconSource = bitmap;
+        }
+        catch
+        {
+            // 解码失败该行就没有图标
+        }
+    }
+
     /// <summary>小图标按钮</summary>
     private static Button CreateIconButton(string glyph, string tooltip)
     {
@@ -325,4 +557,18 @@ public static class ItemEditDialog
 {
     public static Task<bool> ShowAsync(XamlRoot root, LauncherItem item)
         => Dialogs.ItemEditDialogAsync(root, item);
+}
+
+/// <summary>输入地址创建项目弹窗桥接（网址/协议共用）</summary>
+public static class TextItemDialog
+{
+    public static Task<LauncherItem?> ShowAsync(XamlRoot root, LauncherItemType type)
+        => Dialogs.TextItemDialogAsync(root, type);
+}
+
+/// <summary>UWP 应用选择弹窗桥接</summary>
+public static class UwpAppPickerDialog
+{
+    public static Task<LauncherItem?> ShowAsync(XamlRoot root)
+        => Dialogs.UwpAppPickerDialogAsync(root);
 }

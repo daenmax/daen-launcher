@@ -43,6 +43,15 @@ public enum LauncherItemType
 }
 
 /// <summary>
+/// 项目路径的公共格式常量（统一维护，避免魔法字符串散落在各服务里）。
+/// </summary>
+public static class LauncherItemPaths
+{
+    /// <summary>UWP 应用路径前缀：shell:AppsFolder\应用ID（应用ID 形如 B9ECED6F.ArmouryCrate_qmba6cd70vzyy!App）</summary>
+    public const string UwpPrefix = "shell:AppsFolder\\";
+}
+
+/// <summary>
 /// 项目分类（左侧列表的一行）。
 /// </summary>
 public sealed class LauncherCategory
@@ -98,7 +107,8 @@ public sealed class LauncherItem
     /// <summary>命令行参数</summary>
     public string Arguments { get; set; } = "";
 
-    /// <summary>项目图标缓存文件名（存于 data\icon\cache，可选）</summary>
+    /// <summary>外部图标源路径（可选）。从 .url 快捷方式拖入时记录其 IconFile 声明
+    /// （如 Steam 游戏的专属图标），图标提取时优先使用；文件消失则回退按类型提取默认图标。</summary>
     public string? IconFile { get; set; }
 
     /// <summary>路径失效标记（软件启动时检测，不序列化保存到 json，需求-优化1）</summary>
@@ -122,6 +132,22 @@ public enum AutoStartMode
 
     /// <summary>启动文件夹 shell:startup 里放快捷方式</summary>
     StartupFolder
+}
+
+/// <summary>网络代理模式（需求：设置-常规-代理，软件内所有联网功能统一遵循）</summary>
+public enum ProxyMode
+{
+    /// <summary>不使用代理（直连）</summary>
+    None,
+
+    /// <summary>使用系统代理设置（默认；读取 Windows 系统里配置的代理）</summary>
+    System,
+
+    /// <summary>使用 HTTP 代理（自定义地址/端口/账号）</summary>
+    Http,
+
+    /// <summary>使用 SOCKS5 代理（自定义地址/端口/账号）</summary>
+    Socks5
 }
 
 /// <summary>窗口材质</summary>

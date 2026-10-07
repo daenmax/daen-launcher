@@ -535,6 +535,69 @@ build.bat / clean.bat   双击可用的编译/清理脚本
 - 版本号 1.3.0 → 1.3.1。Debug/Release 0 错误 0 警告，产物已复制 build\ 并探针确认（ReloadRecord/RefreshWallpaperWindowView 均在）。
 - **测试**：由用户实测（导出勾壁纸 → 删除本地壁纸数据 → 导入回 → 壁纸窗口/记录恢复正常）。
 
+## 最新变更（2026-10-07 第五十轮：Tooltip 增强 + 桌面快捷方式 + 默认尺寸 + 右键"添加项目"）
+
+- **需求1 悬停提示增强**：项目 Tooltip 由"名称/备注"改为 **名称 + 路径 + 备注 + 命令行参数**（备注/参数为空时不显示对应行），MainWindow.BuildItemTooltip 统一构建，语言键 Main.Item.Tooltip.Path/Remark/Arguments。
+- **需求2 创建桌面快捷方式**：项目右键菜单新增"创建桌面快捷方式"。新服务 `DesktopShortcutService` 分类型处理：Exe/Lnk/File/Folder 走 WScript.Shell 反射建 .lnk（带 Arguments/WorkingDirectory）；Url/Protocol 写 .url 文件（InternetShortcut INI，URL 先转绝对 URI 转义非 ASCII）；**Uwp 用 SHParseDisplayName(项目路径) → IShellLinkW.SetIDList → IPersistFile.Save**（系统同款方式，快捷方式自动带应用图标），失败回退 explorer.exe 中转 .lnk。桌面文件不覆盖：重名追加" (2)"。成功静默，失败弹错误弹窗。复用 LnkResolver 里 internal 的 ShellLink/IShellLinkW/IPersistFile 声明。
+- **需求3 默认显示尺寸**：项目图标 40→**32**、文字 12→**14**、横向间距 8→**12**。默认值提为 AppSettings 常量（DefaultItemIconSize/DefaultItemTextSize/DefaultItemHorizontalSpacing），设置页"恢复默认"按钮引用同一常量（不再两处漂移）。
+- **需求4 右键"添加项目"**：项目面板空白处右键 → MenuFlyoutSubItem"添加项目" → **可执行程序(.exe 选择器)/快捷方式(.lnk 选择器，DropResolver.ResolveShortcutFile 解析出真实目标，与拖拽行为一致)/文件夹(FolderPicker)/文件/网址(输入弹窗+校验)/UWP 应用（微软商店）/协议(输入弹窗+校验)**。目标子分类 = 指针所在卡片/Tab头（FindSubAtPanelPointer，从 PanelHost_Drop 的两处重复命中逻辑提取）> 当前 Tab > 第一个。MainWindow.xaml 给 PanelHost 挂 RightTapped；右键到项目按钮上时跳过（项目自己的菜单已弹出）。
+- **UWP 应用枚举**：新服务 `InstalledAppService`，枚举 shell:AppsFolder（AppsFolder shell 命名空间）：IShellFolder.EnumObjects 逐项取解析名，**只保留解析名含 "!" 的项（UWP AUMID 固定"包家族名!应用ID"，桌面程序没有）**。实测 264 子项 → 38 个商店应用。结果进程内缓存 + 显示名排序。新弹窗 UwpAppPickerDialog：搜索框（按名称/ID 过滤，运行时 DataTemplate + {Binding}）+ ListView 双行（名称+ID）。添加后 Path = "shell:AppsFolder\AUMID"（**前缀提为 Models.LauncherItemPaths.UwpPrefix 常量**，LauncherRunner/DropResolver 同步改用）。
+- **新增服务**：DesktopShortcutService、InstalledAppService、ShellConstants（FOLDERID_AppsFolder GUID/SHGDN/SHCONTF 常量）、Dialogs.TextItemDialog（网址/协议共用，实时校验：网址须 http/https；协议须 scheme: 形式且排除 http/https；名称可自动填充主机名）。
+- **语言**：zh/en 各 +19 键（608 对齐 0 缺失）：Main.Item.CreateShortcut(+Failed)/Add.*（7 类型）/Tooltip.*(3)、Main.UwpPicker.*（2）、Dialog.ItemUrl/ItemProtocol/UrlInvalid/ProtocolInvalid。
+- **测试**：Debug 0 错误 0 警告；**核心 COM 互操作用独立控制台程序验证**——AppsFolder 枚举（264 子项/38 UWP）、UWP .lnk 创建（SetIDList）、.url 写入、WScript .lnk 全通过；应用启动冒烟 6s 存活无 crash.log。UI 交互（菜单/弹窗/Tooltip 显示效果）待用户实测。
+
+## 最新变更（2026-10-07 第五十一轮：UWP/协议项目显示真实图标）
+
+- **问题**：UWP 应用和协议类型的项目添加后只显示通用占位图标——`ItemIconService.GetIconAsync` 原来对 Uwp/Url/Protocol 三种类型直接早退返回 null。
+- **UWP 图标**：新方法 `ExtractUwpIconPng`——`SHCreateItemFromParsingName(shell:AppsFolder\AUMID)` → `IShellItemImageFactory.GetImage(256×256, SIIGBF_ICONONLY|SIIGBF_BIGGERSIZEOK)` → `HBitmapToPngBytes`。这是系统给商店应用建快捷方式用的同款 API，拿到的是应用正式图标（256px 高清，UI 自动缩放）。路径规范化：没带 `shell:AppsFolder\` 前缀但含 `!` 的老数据自动补全。**实测 Armoury Crate（用户给的 AUMID）成功提取 256×256 官方图标**。
+- **协议图标**：新方法 `ExtractProtocolIconPng`——`AssocQueryString(ASSOCSTR_EXECUTABLE, 协议名, "open")` 查协议默认处理程序的 exe → 复用 SHGetFileInfo 提取。**实测 steam:// → steam.exe 图标**。注意语义：一个协议只有一个处理程序，同一协议的不同地址（不同 Steam 游戏）图标相同；无 exe 处理程序的协议（ms-settings:）返回 0x80070483 → 回退占位图标。
+- **HBITMAP→PNG 透明度保留**：GetImage 返回的 HBITMAP 不能直接 `Image.FromHbitmap`（丢 alpha，图标变黑底方块）——用 `GetDIBits` 拷 32bpp 位数据（负高度=自上而下）→ 扫描 alpha 字节全为 0 则置 255（修正无透明通道图标整体消失）→ LockBits 写回 → 存 PNG。
+- **Url 类型维持占位图标**：各网站应显示各自图标需要联网取 favicon，暂不支持（协议/UWP 是本地可解的，所以本轮只做这两个）。
+- **缓存**：走原有机制（item.Id.png + .meta 记录源路径，路径改了自动重新提取）。
+- **测试**：独立控制台程序验证（IShellItemImageFactory 三应用 256px + steam 协议 + ms-settings 优雅失败 + alpha 采样确认透明区域正常）；Debug 0 错 0 警；应用冒烟 6s 存活无 crash.log。UI 效果待用户实测（老项目首次显示时会有一次图标提取）。
+- 版本号 1.4.0 → 1.4.1。
+
+## 最新变更（2026-10-07 第五十二轮：网址自动取 favicon + UWP 选择器列表带图标）
+
+- **需求1 网址类型联网取 favicon**：新服务 `FaviconService`（纯 System.Drawing+Http，无 WinUI 依赖，可独立测试）。抓取策略：① `https://主机/favicon.ico` → ② `http://主机/favicon.ico` → ③ 下载首页前 256KB 解析 `<link rel="icon">`（优先 apple-touch-icon，相对地址转绝对）再下载。下载后统一重编码：ICO 用 `new Icon(ms,32,32)` 选最接近 32px 的帧（GDI+ 默认取第一帧常常 16px 太糊），大图等比缩到 ≤128px，统一转 PNG 存缓存。
+  - **站点连不上直接短路**：TryDownloadAsync 返回 (png, reachable)，连接失败就放弃后续尝试——失败站点 24s → 8s（实测 github 直连）。HttpClient 共享实例，**默认走系统代理**（用户配了代理自动生效，不硬编码代理）。
+  - **会话内失败记录**：ItemIconService.FailedFaviconUrls（HashSet+锁）——面板重建会反复触发 GetIconAsync，失败网址本次会话不再联网（避免反复超时），下次启动自动重试。
+- **需求2 UWP 选择器列表加图标**：`InstalledUwpApp` record → **INotifyPropertyChanged 类**（+IconSource 属性，加载完自动刷新行）；`ItemIconService.GetUwpAppIconPngBytesAsync`（按 AUMID 磁盘缓存 `uwp_应用ID.png`，主面板项目图标仍按项目 Id 缓存，两套互不影响）；选择器 DataTemplate 加 32×32 Image 列 + 后台**顺序**加载循环（LoadUwpAppIconsAsync，避免几十个并发 Shell 提取；每个完成切回 UI 线程创建 BitmapImage——WinUI 位图有线程亲和性）。列表立即显示、图标逐行浮现，搜索过滤共用同一批对象不重复加载。
+- **踩坑**：这版 SDK 的 **XamlRoot 没有 DispatcherQueue 属性**（后续版本才有）→ 在弹窗打开时（UI 线程上）`DispatcherQueue.GetForCurrentThread()` 取。
+- **测试**：FaviconService 用独立工程直接 Compile Include 真实源文件实测——baidu 64px/qq 96px/bilibili 32px(CDN link 解析)/zhihu 32px 成功、github 直连失败优雅 null（8s 短路）、不存在域名 51ms null；图标透明通道完好（QQ 企鹅/B 站电视目视确认）。Debug 0 错 0 警；应用冒烟 6s 存活无 crash.log。UI 效果待用户实测。
+- 版本号 1.4.1 → 1.4.2。
+
+## 最新变更（2026-10-07 第五十三轮：右键菜单"刷新图标"）
+
+- **需求**：项目右键菜单新增"刷新图标"（放在"复制完整路径"之后、删除之前），点击后强制重新提取图标并更新本地缓存，**支持全部类型**（可执行程序/快捷方式/文件夹/文件/网址/UWP/协议）。
+- **实现**：`ItemIconService.RefreshIconAsync(item)`——DeleteCache（清 {itemId}.png + .meta）→ **ClearFailedFavicon**（新增 public 方法：网址类型清会话内失败记录，允许立即重新联网抓 favicon，否则会被 FailedFaviconUrls 拦住直接返回 null）→ GetIconAsync 按类型走原提取链路（Shell 提取/IShellItemImageFactory/AssocQueryString/FaviconService）并重写缓存。成功后 RebuildPanel 让新图标立即显示；失败弹"图标刷新失败：{0}"。
+- **语言**：zh/en 各 +2 键（Main.Item.RefreshIcon / RefreshIconFailed，610 键对齐 0 缺失）。
+- **测试**：Debug 0 错 0 警；应用冒烟 6s 存活无 crash.log。UI 交互待用户实测。
+
+## 最新变更（2026-10-07 第五十四轮：修复 Steam 游戏 .url 拖入误判"网址"+ 游戏专属图标）
+
+- **问题**：桌面拖入 Steam 游戏快捷方式（`.url` 文件，内容 `URL=steam://rungameid/993090`）被一律标为"网址"类型——网址类型联网抓 favicon，steam:// 永远抓不到 → 图标不显示、"刷新图标"也失败。
+- **修复1 类型判断**：`DropResolver.ResolveShortcutFile` 的 .url 分支新增 `ClassifyUrl`——http/https → 网址，其他（steam:// 等）→ **协议**（.lnk 分支原本就有此判断，.url 分支漏了）。
+- **修复2 游戏专属图标**：Steam 的 .url 里带 `IconFile` 声明（指向该游戏的 ico，如 `steam\games\xxx.ico`）。`LnkResolver` 新增 `ReadInternetShortcut`（URL + IconFile + IconIndex 三项解析）；`LauncherItem.IconFile` 字段（原本声明未使用）改为"外部图标源路径"语义，.url 拖入时记录；`ItemIconService` 提取图标时**优先用 IconFile**（新增 `ExtractExternalIconPng`：png/jpg/bmp/gif 直接 GDI+ 解码，.ico 等走 SHGetFileInfo），文件消失回退类型默认提取。**实测 Lossless Scaling 提取出黄色小鸭游戏图标（比协议处理程序的通用 Steam 图标更好）**。右键"刷新图标"对此类项目同样生效。
+- **修复3 存量数据迁移**：`LauncherDataService.NormalizeLegacyUrlTypes`——启动/导入重载时把"网址类型但地址非 http/https"的项目自动修正为"协议"并落盘（用户现有的 Lossless Scaling 条目下次启动自动变协议、显示 Steam 图标；想换游戏小鸭图标删掉重新拖入即可）。
+- **测试**：控制台工程编译真实源文件实测——真实桌面 Lossless Scaling.url 解析为 Protocol + IconFile 指向游戏 ico ✓；.ico 经 SHGetFileInfo 提取出 32px 小鸭图标 ✓。Debug 0 错 0 警；应用冒烟 6s 存活无 crash.log。
+- 版本号 1.4.3 → 1.4.4。
+
+## 最新变更（2026-10-07 第五十五轮：设置-常规新增"代理"配置，全局联网统一走代理）
+
+- **需求**：设置-常规新增代理卡片——下拉框（不使用代理/使用系统代理设置/使用 HTTP 代理/使用 SOCKS5 代理，**默认系统代理**）；选 HTTP/SOCKS5 时显示地址/端口/用户名/密码输入框 + "测试代理"和"保存代理"按钮，**测试通过才能点保存**。
+- **新服务 `ProxyService`**（所有联网代码统一入口，禁止自己 new HttpClient）：
+  - `CreateHttpClient(timeout?)`——按设置构造 `SocketsHttpHandler`：None=UseProxy=false；System=默认（读系统代理）；Http/Socks5=`WebProxy("http://…" / "socks5://…")`（.NET 内置支持 socks5），账号非空时挂 NetworkCredential。
+  - **共享 handler + 配置指纹**：模式|地址|端口|账号|密码 拼指纹，变化即换新 handler（旧的不 Dispose 防在途请求崩），**代理修改立即生效无需重启**；各功能共用连接池，超时各自传参（favicon 8s/webnote 15s/壁纸 20s/默认 30s）。
+  - **防呆**：HTTP/SOCKS5 模式下地址为空或端口非法 → 回退系统代理（避免配置不完整导致全软件断网）。
+  - `TestProxyAsync(mode,host,port,user,pass)`——用界面值（非已保存值）构造 handler 请求 `https://www.baidu.com/`（国内外都可达），失败消息原样展示（连接拒绝/超时/认证失败可直接定位）。
+  - **占位注释**：检查版本更新（后续完善）实现时用 CreateHttpClient 即可自动走代理。
+- **消费者接入**（字段改属性，调用点零改动）：FaviconService / WebNoteClient（webnote 云同步）/ WallpaperService（必应壁纸）。
+- **设置 UI**：GeneralPage.BuildProxyCard——模式切换立即保存（与其他设置一致）+ 明细区按模式显隐；**任一字段修改后测试结果作废、保存按钮重新禁用**；端口校验 1-65535；结果文字 绿=通过/红=失败/灰=测试中。卡片图标复用 Globe 字形。
+- **测试**：控制台工程编译真实源文件实测——HTTP 真实代理(127.0.0.1:7890) OK、直连 OK、未开放端口快速失败带原因、空地址回退系统代理 OK、SOCKS5 协议真实生效（7890 是 mixed 端口同时支持）、指纹重建 OK。Debug 0 错 0 警；应用冒烟 6s 存活无 crash.log。设置页 UI 待用户实测。
+- **语言**：zh/en 各 +20 键（Settings.Proxy.* 20 项，630 键对齐 0 缺失）。版本号 1.4.4 → 1.5.0。
+- **README 同步**（第五十~五十五轮）：多种项目类型（右键添加项目/UWP 商店应用选择器）、智能图标完整能力（UWP 高清图标/协议处理程序图标/favicon/Steam 游戏专属图标/刷新图标）、右键菜单新项（创建桌面快捷方式/刷新图标）、悬停提示、设置-常规网络代理。
+
 ## 当前进度
 - ✅ 需求1.md 主体 + 十八轮改进/修复全部完成；**"资源管理器菜单"需求已在第十九轮彻底移除（用户决定放弃）**。
 - ✅ 第二十轮：待办功能完成（窗口 + 本地存储 + webnote 云同步 + 设置页）。
@@ -557,10 +620,17 @@ build.bat / clean.bat   双击可用的编译/清理脚本
 - ✅ 第四十七轮：必应每日壁纸功能上线（窗口 + 官方/biturl 双接口 + 换壁纸 + 每日自动更换记录 + 保存到本地 + 设置页 + 热键 Alt+6）。
 - ✅ 第四十八轮：壁纸更换成功弹系统 Toast（大图+日期+描述）+ "模式"设置（六种显示方式）+ cache 目录自动清理策略。
 - ✅ 第四十九轮：数据导出/导入/删除支持必应壁纸数据（含删除/导入后的记录重载与窗口刷新）+ README 数据条目同步。
+- ✅ 第五十轮：项目 Tooltip 显示路径/备注/参数 + 右键"创建桌面快捷方式"（三类快捷方式全支持含 UWP）+ 默认尺寸 32/14/12 + 面板右键"添加项目"（7 种类型，UWP 可列出商店应用）。
+- ✅ 第五十一轮：UWP/协议项目显示真实图标（IShellItemImageFactory 拿商店应用 256px 图标；AssocQueryString 查协议处理程序图标；GetDIBits 保留透明度）。
+- ✅ 第五十二轮：网址类型联网取 favicon（favicon.ico → HTML link 解析，系统代理自动生效，失败短路 + 会话内不重试）；UWP 选择器列表逐行显示应用图标（AUMID 磁盘缓存 + INPC 刷新）。
+- ✅ 第五十三轮：项目右键"刷新图标"（清缓存重新提取全类型支持；网址类型同时清会话内失败记录允许立即重联网）。
+- ✅ 第五十四轮：修复 .url 拖入误判"网址"（steam:// 现在正确判为协议）+ 记录 .url 的 IconFile 用游戏专属图标 + 旧数据自动迁移（非 http/https 的网址条目 → 协议）。
+- ✅ 第五十五轮：设置-常规新增"代理"配置（四种模式默认系统代理，HTTP/SOCKS5 测试通过才能保存）；新 ProxyService 统一全局代理（FaviconService/WebNoteClient/WallpaperService 已接入，配置变化立即生效）。
 - ⚠️ 待用户实测：第十二轮（覆盖 70% 触发重排 + 滑动动画）、**第二十~三十一轮（待办/随手记全部交互、云同步、附属功能栏配置、图标选择器）**、**第三十八轮（剪贴板全部交互）**。
 - 📌 回滚点：commit 991b8b1（第十一轮拖拽可用版本）。第十二轮起改动尚未提交，确认手感后再提交新检查点。
 
 ## 待办事项
+- 检查版本更新/自动更新（关于页占位）：实现时用 `ProxyService.CreateHttpClient()` 发请求即可自动遵循代理配置（第五十五轮占位记录）。
 - 用户实测后修 bug（重点：第四十二轮常用工具的全部子工具交互、SM4/AES 各模式参数组合、屏幕取色、颜色盘拖动、文件拖拽；第四十七轮壁纸的接口连通性/换壁纸/每日自动更换）。
 - 剪贴板云同步（如需要，下轮需求；当前剪贴板仅本地存储）。
 - "左键双击桌面"、"双击任务栏"触发（预留复选框，需窗口层级判断）。
@@ -597,3 +667,7 @@ build.bat / clean.bat   双击可用的编译/清理脚本
 19. **图标缓存有两层**：换 logo 后"任务栏还是旧图标"要先分清——① 应用自己的 `data\icon\cache\app.ico`（EnsureAppIconExtracted 现按字节比对自动刷新）；② Windows 资源管理器的图标缓存（按 exe 路径缓存，重启 explorer / 删 `%LocalAppData%\IconCache.db` 和 `%LocalAppData%\Microsoft\Windows\Explorer\iconcache_*.db` / 取消重新固定任务栏才能刷新）。验证技巧：把 exe 复制改名再跑，若任务栏显示新图标即实锤是系统缓存。
 
 20. **WinUI TextBox 换行符是 CR**：按行处理文本必须归一化 CRLF/CR/LF（ToolKit.SplitLines），输出统一拼 CRLF（ToolKit.JoinLines；SetOutput 自动归一化）。
+21. **ComImport 接口必须声明完整 vtable**（第五十轮实锤）：COM 接口互操作只声明"用得到的方法"会把调用路由到错误的函数指针上——IShellFolder 漏了中间的 BindToStorage/CompareIDs/CreateViewObject 后，GetDisplayNameOf 直接 0xC0000005 原生崩溃（文件系统项也一样崩，可据此与"环境问题"区分）。排查手段：把可疑互操作拷进独立控制台程序 + 对照实验（桌面文件夹解析 notepad.exe 后调 GetDisplayNameOf）。
+22. **FOLDERID_AppsFolder 可能 E_FAIL**：SHGetKnownFolderPath({1e87508d-…}) 在受限上下文返回 0x80004005，而 **"shell:AppsFolder" 可以被 SHParseDisplayName 直接解析**——取 AppsFolder 入口要多级回退（known folder → shell:AppsFolder → ::{GUID}）。识别 UWP 应用的规则：AppsFolder 子项解析名含 "!"（AUMID = 包家族名!应用ID），桌面程序没有。
+23. **x64 ABI：≤8 字节的结构体参数按"单个寄存器"整体传值**（第五十一轮实锤）：`IShellItemImageFactory.GetImage(SIZE size, ...)` 的 SIZE 拆成两个 int 声明会占两个寄存器、参数错位，直接 0xC0000005——必须原样声明结构体参数。同族坑：第 21 条的 vtable 漏方法。
+24. **GetImage 的 HBITMAP 直接 FromHbitmap 丢 alpha**：图标会变黑底方块；必须 GetDIBits 拷 32bpp 数据自建 Bitmap，且要处理"全图 alpha=0"的退化情况（统一置 255，否则图标整体透明看不见）。

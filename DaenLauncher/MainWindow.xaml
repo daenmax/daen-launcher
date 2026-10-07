@@ -93,9 +93,11 @@
             </local:SplitterGrid>
 
             <!-- 右侧：项目面板（Tab/卡片两种风格，代码动态构建）。
-                 Background=Transparent 使整个面板区域可命中拖放（需求-布局4） -->
+                 Background=Transparent 使整个面板区域可命中拖放（需求-布局4）；
+                 空白处右键弹出"添加项目"菜单（右键到项目上时由项目自己的菜单处理） -->
             <Grid Grid.Column="2" x:Name="PanelHost" Background="Transparent"
-                  AllowDrop="True" DragOver="PanelHost_DragOver" Drop="PanelHost_Drop" />
+                  AllowDrop="True" DragOver="PanelHost_DragOver" Drop="PanelHost_Drop"
+                  RightTapped="PanelHost_RightTapped" />
         </Grid>
     </Grid>
 </Window>

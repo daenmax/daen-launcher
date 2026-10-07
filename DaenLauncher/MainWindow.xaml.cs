@@ -919,17 +919,7 @@ public sealed partial class MainWindow : Window
 
             // 用指针位置实时命中 Tab 头/卡片，确定目标子分类
             var pointer = e.GetPosition(PanelHost);
-            LauncherSubCategory? internalTargetSub = null;
-            foreach (var (candidate, element) in _panelTargets)
-            {
-                var bounds = element.TransformToVisual(PanelHost).TransformBounds(
-                    new Windows.Foundation.Rect(0, 0, element.ActualWidth, element.ActualHeight));
-                if (bounds.Contains(pointer))
-                {
-                    internalTargetSub = candidate;
-                    break;
-                }
-            }
+            var internalTargetSub = FindSubAtPanelPointer(pointer);
             internalTargetSub ??= _dropHoverSub ?? _currentTabSub;
             if (internalTargetSub == null || !category.SubCategories.Contains(internalTargetSub))
             {
@@ -958,17 +948,7 @@ public sealed partial class MainWindow : Window
         // ===== 外部拖放（从资源管理器等拖入文件/网址）=====
         // 优先用指针位置实时命中（比 DragEnter 悬停记录更可靠）
         var extPointer = e.GetPosition(PanelHost);
-        LauncherSubCategory? targetSub = null;
-        foreach (var (candidate, element) in _panelTargets)
-        {
-            var bounds = element.TransformToVisual(PanelHost).TransformBounds(
-                new Windows.Foundation.Rect(0, 0, element.ActualWidth, element.ActualHeight));
-            if (bounds.Contains(extPointer))
-            {
-                targetSub = candidate;
-                break;
-            }
-        }
+        var targetSub = FindSubAtPanelPointer(extPointer);
         // 实时命中失败再退回悬停记录/当前 Tab/第一个
         targetSub ??= _dropHoverSub ?? _currentTabSub;
         if (targetSub == null || !category.SubCategories.Contains(targetSub))
@@ -1591,7 +1571,8 @@ public sealed partial class MainWindow : Window
             },
             VerticalContentAlignment = VerticalAlignment.Center
         };
-        ToolTipService.SetToolTip(button, string.IsNullOrEmpty(item.Remark) ? item.Name : $"{item.Name}\n{item.Remark}");
+        // 悬停提示：名称 + 完整路径 + 备注 + 命令行参数（需求）
+        ToolTipService.SetToolTip(button, BuildItemTooltip(item));
 
         // 内容块的对齐（居左/居中/居右，跟随"图标和文字位置"设置）
         var contentAlignment = settings.ItemContentAlignment switch
@@ -1680,6 +1661,23 @@ public sealed partial class MainWindow : Window
         _ = LoadItemIconAsync(item, iconHost, settings.ItemIconSize);
 
         return button;
+    }
+
+    /// <summary>构建项目悬停提示：名称 + 完整路径 + 备注 + 命令行参数（需求）</summary>
+    private static string BuildItemTooltip(LauncherItem item)
+    {
+        var loc = LocalizationService.Instance;
+        var builder = new System.Text.StringBuilder(item.Name);
+        builder.Append('\n').Append(loc.T("Main.Item.Tooltip.Path")).Append(": ").Append(item.Path);
+        if (!string.IsNullOrWhiteSpace(item.Remark))
+        {
+            builder.Append('\n').Append(loc.T("Main.Item.Tooltip.Remark")).Append(": ").Append(item.Remark);
+        }
+        if (!string.IsNullOrWhiteSpace(item.Arguments))
+        {
+            builder.Append('\n').Append(loc.T("Main.Item.Tooltip.Arguments")).Append(": ").Append(item.Arguments);
+        }
+        return builder.ToString();
     }
 
     /// <summary>文字块（文字大小可为 0 = 不显示；列表模式不限制宽度换行）</summary>
@@ -1821,12 +1819,22 @@ public sealed partial class MainWindow : Window
         locationItem.Click += (_, _) => LauncherRunner.OpenContainingFolder(item);
         menu.Items.Add(locationItem);
 
+        // 创建桌面快捷方式（需求）
+        var shortcutItem = new MenuFlyoutItem { Text = loc.T("Main.Item.CreateShortcut") };
+        shortcutItem.Click += (_, _) => CreateDesktopShortcut(item);
+        menu.Items.Add(shortcutItem);
+
         menu.Items.Add(new MenuFlyoutSeparator());
 
         // 复制完整路径
         var copyItem = new MenuFlyoutItem { Text = loc.T("Main.Item.CopyPath") };
         copyItem.Click += (_, _) => LauncherRunner.CopyFullPath(item);
         menu.Items.Add(copyItem);
+
+        // 刷新图标：清缓存重新提取，支持所有类型（需求）
+        var refreshIconItem = new MenuFlyoutItem { Text = loc.T("Main.Item.RefreshIcon") };
+        refreshIconItem.Click += (_, _) => _ = RefreshItemIconAsync(item);
+        menu.Items.Add(refreshIconItem);
 
         // 删除项目
         var deleteItem = new MenuFlyoutItem { Text = loc.T("Main.Item.Delete") };
@@ -1845,6 +1853,180 @@ public sealed partial class MainWindow : Window
         menu.Items.Add(editItem);
 
         menu.ShowAt(button, new Windows.Foundation.Point(0, button.ActualHeight));
+    }
+
+    /// <summary>在桌面创建项目快捷方式（需求）。成功时静默（桌面即反馈），失败弹提示。</summary>
+    private void CreateDesktopShortcut(LauncherItem item)
+    {
+        var success = DesktopShortcutService.CreateOnDesktop(item);
+        if (!success)
+        {
+            _ = ShowMessageDialog(
+                string.Format(LocalizationService.Tr("Main.Item.CreateShortcutFailed"), item.Name),
+                LocalizationService.Tr("Dialog.Error"));
+        }
+    }
+
+    /// <summary>刷新项目图标：清掉缓存重新提取（网址类型会重新联网抓 favicon），
+    /// 成功后重建面板让新图标立即显示，失败弹提示（需求）。</summary>
+    private async Task RefreshItemIconAsync(LauncherItem item)
+    {
+        var success = await ItemIconService.RefreshIconAsync(item);
+        if (success)
+        {
+            RebuildPanel();
+        }
+        else
+        {
+            await ShowMessageDialog(
+                string.Format(LocalizationService.Tr("Main.Item.RefreshIconFailed"), item.Name),
+                LocalizationService.Tr("Dialog.Error"));
+        }
+    }
+
+    #endregion
+
+    #region 添加项目（面板空白处右键菜单，需求）
+
+    /// <summary>项目面板右键：右键到某个项目上时由项目自己的菜单处理（这里跳过）；
+    /// 空白处弹出"添加项目"菜单，支持可执行程序/快捷方式/文件夹/文件/网址/UWP 应用/协议。</summary>
+    private void PanelHost_RightTapped(object sender, RightTappedRoutedEventArgs e)
+    {
+        // 右键的原始元素向上查到项目按钮（文本/图标都是按钮的子元素）：项目菜单已弹出，不再重复
+        if (FindAncestor<Button>(e.OriginalSource as DependencyObject)?.Tag is LauncherItem) return;
+
+        // 目标子分类：指针所在的卡片/Tab 头 > 当前选中的 Tab > 第一个子分类
+        // （必须在 await 之前确定——路由事件参数在异步之后不可用）
+        var targetSub = FindSubAtPanelPointer(e.GetPosition(PanelHost))
+                        ?? _currentTabSub
+                        ?? (CategoryListView.SelectedItem as LauncherCategory)?.SubCategories.FirstOrDefault();
+        if (targetSub == null) return;
+
+        var loc = LocalizationService.Instance;
+        var menu = new MenuFlyout();
+        var addSub = new MenuFlyoutSubItem { Text = loc.T("Main.Item.Add") };
+
+        // 快捷创建一个"添加项目"菜单项
+        void AddEntry(string text, Func<Task> action)
+        {
+            var menuItem = new MenuFlyoutItem { Text = text };
+            menuItem.Click += (_, _) => _ = action();
+            addSub.Items.Add(menuItem);
+        }
+
+        AddEntry(loc.T("Main.Item.Add.Exe"), () => AddItemByFilePickerAsync(targetSub, ".exe", LauncherItemType.Exe));
+        AddEntry(loc.T("Main.Item.Add.Lnk"), () => AddItemByFilePickerAsync(targetSub, ".lnk", LauncherItemType.Lnk));
+        AddEntry(loc.T("Main.Item.Add.Folder"), () => AddItemByFolderPickerAsync(targetSub));
+        AddEntry(loc.T("Main.Item.Add.File"), () => AddItemByFilePickerAsync(targetSub, "*", LauncherItemType.File));
+        AddEntry(loc.T("Main.Item.Add.Url"), () => AddItemByTextDialogAsync(targetSub, LauncherItemType.Url));
+        AddEntry(loc.T("Main.Item.Add.Uwp"), () => AddItemByUwpPickerAsync(targetSub));
+        AddEntry(loc.T("Main.Item.Add.Protocol"), () => AddItemByTextDialogAsync(targetSub, LauncherItemType.Protocol));
+
+        menu.Items.Add(addSub);
+        menu.ShowAt(PanelHost, e.GetPosition(PanelHost));
+    }
+
+    /// <summary>用指针位置实时命中面板上的子分类（卡片/Tab 头），没命中返回 null</summary>
+    private LauncherSubCategory? FindSubAtPanelPointer(Windows.Foundation.Point pointer)
+    {
+        foreach (var (candidate, element) in _panelTargets)
+        {
+            var bounds = element.TransformToVisual(PanelHost).TransformBounds(
+                new Windows.Foundation.Rect(0, 0, element.ActualWidth, element.ActualHeight));
+            if (bounds.Contains(pointer)) return candidate;
+        }
+        return null;
+    }
+
+    /// <summary>通过文件选择器添加项目（可执行程序/快捷方式/文件）。
+    /// 快捷方式会解析出真实目标（exe/网址/协议/UWP），与拖拽 .lnk 进来的行为一致。</summary>
+    private async Task AddItemByFilePickerAsync(LauncherSubCategory targetSub, string extension,
+        LauncherItemType fallbackType)
+    {
+        try
+        {
+            // WinUI 的文件选择器在解包应用里需要绑定窗口句柄才能弹出
+            var picker = new Windows.Storage.Pickers.FileOpenPicker();
+            WinRT.Interop.InitializeWithWindow.Initialize(picker, _hWnd);
+            picker.FileTypeFilter.Add(extension);
+
+            var file = await picker.PickSingleFileAsync();
+            if (file == null) return;
+
+            LauncherItem newItem;
+            if (fallbackType == LauncherItemType.Lnk)
+            {
+                newItem = DropResolver.ResolveShortcutFile(file.Path) ?? new LauncherItem
+                {
+                    Name = System.IO.Path.GetFileNameWithoutExtension(file.Name),
+                    Path = file.Path,
+                    Type = LauncherItemType.Lnk
+                };
+            }
+            else
+            {
+                newItem = new LauncherItem
+                {
+                    Name = System.IO.Path.GetFileNameWithoutExtension(file.Name),
+                    Path = file.Path,
+                    Type = fallbackType
+                };
+            }
+            AddLauncherItem(targetSub, newItem);
+        }
+        catch (Exception ex)
+        {
+            await ShowMessageDialog(ex.Message, LocalizationService.Tr("Dialog.Error"));
+        }
+    }
+
+    /// <summary>通过文件夹选择器添加项目（文件夹）</summary>
+    private async Task AddItemByFolderPickerAsync(LauncherSubCategory targetSub)
+    {
+        try
+        {
+            var picker = new Windows.Storage.Pickers.FolderPicker();
+            WinRT.Interop.InitializeWithWindow.Initialize(picker, _hWnd);
+            picker.FileTypeFilter.Add("*"); // FolderPicker 必须设置过滤器（即使是全部文件）
+
+            var folder = await picker.PickSingleFolderAsync();
+            if (folder == null) return;
+
+            AddLauncherItem(targetSub, new LauncherItem
+            {
+                Name = folder.Name,
+                Path = folder.Path,
+                Type = LauncherItemType.Folder
+            });
+        }
+        catch (Exception ex)
+        {
+            await ShowMessageDialog(ex.Message, LocalizationService.Tr("Dialog.Error"));
+        }
+    }
+
+    /// <summary>通过输入弹窗添加项目（网址/协议共用）</summary>
+    private async Task AddItemByTextDialogAsync(LauncherSubCategory targetSub, LauncherItemType type)
+    {
+        var newItem = await Dialogs.TextItemDialog.ShowAsync(Content.XamlRoot, type);
+        if (newItem == null) return;
+        AddLauncherItem(targetSub, newItem);
+    }
+
+    /// <summary>通过应用选择弹窗添加 UWP 应用（列出系统安装的微软商店应用）</summary>
+    private async Task AddItemByUwpPickerAsync(LauncherSubCategory targetSub)
+    {
+        var newItem = await Dialogs.UwpAppPickerDialog.ShowAsync(Content.XamlRoot);
+        if (newItem == null) return;
+        AddLauncherItem(targetSub, newItem);
+    }
+
+    /// <summary>把新项目加入子分类并保存、刷新面板</summary>
+    private void AddLauncherItem(LauncherSubCategory targetSub, LauncherItem newItem)
+    {
+        targetSub.Items.Add(newItem);
+        LauncherDataService.Instance.Save();
+        RebuildPanel();
     }
 
     #endregion
