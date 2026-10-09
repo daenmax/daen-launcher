@@ -85,6 +85,9 @@ public static class ToolRegistry
             new ToolDefinition("uuid", "Tools.Uuid", () => new UuidTool().Build()),
             new ToolDefinition("timestamp", "Tools.Timestamp", () => new TimestampTool().Build()),
             new ToolDefinition("colorPicker", "Tools.ColorPicker", () => new ColorPickerTool().Build()),
+            new ToolDefinition("wifiPassword", "Tools.WifiPassword", () => new WifiPasswordTool().Build()),
+            new ToolDefinition("timeSync", "Tools.TimeSync", () => new TimeSyncTool().Build()),
+            new ToolDefinition("qrCode", "Tools.QrCode", () => new QrCodeTool().Build()),
         ]),
     ];
 

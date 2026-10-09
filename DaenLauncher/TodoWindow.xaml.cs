@@ -20,6 +20,12 @@ namespace DaenLauncher;
 /// </summary>
 public sealed partial class TodoWindow : Window
 {
+    /// <summary>待办窗口默认宽度（逻辑像素，窗口尺寸固定不可调）</summary>
+    private const double DefaultWidth = 420;
+
+    /// <summary>待办窗口默认高度（逻辑像素，窗口尺寸固定不可调）</summary>
+    private const double DefaultHeight = 640;
+
     private readonly TodoService _todo = TodoService.Instance;
     private readonly AppSettings _settings = SettingsService.Instance.Settings;
 
@@ -108,7 +114,7 @@ public sealed partial class TodoWindow : Window
         ThemeService.ApplyCaptionButtonColors(_appWindow, RootGrid);
 
         // 默认尺寸：窄而高的便签风格
-        _appWindow.Resize(new Windows.Graphics.SizeInt32(420, 640));
+        _appWindow.Resize(new Windows.Graphics.SizeInt32((int)DefaultWidth, (int)DefaultHeight));
 
         // 应用置顶/锁定尺寸设置
         ApplyBehaviorSettings();
@@ -178,63 +184,11 @@ public sealed partial class TodoWindow : Window
     /// <summary>按设置的显示位置定位窗口（参考主窗口实现）</summary>
     private void ComputeShowPosition()
     {
-        var displayArea = Microsoft.UI.Windowing.DisplayArea.GetFromWindowId(
-            Microsoft.UI.Win32Interop.GetWindowIdFromWindow(_hWnd),
-            Microsoft.UI.Windowing.DisplayAreaFallback.Nearest);
-        var wa = displayArea.WorkArea;
-
-        // AppWindow 用物理像素，窗口设置是逻辑像素（默认 420x640）
-        var scale = GetDpiScale();
-        var width = (int)(420 * scale);
-        var height = (int)(640 * scale);
-
-        int x, y;
-        switch (_settings.TodoShowPosition)
-        {
-            case ShowPosition.TopLeft:
-                x = wa.X; y = wa.Y;
-                break;
-            case ShowPosition.TopRight:
-                x = wa.X + wa.Width - width; y = wa.Y;
-                break;
-            case ShowPosition.BottomLeft:
-                x = wa.X; y = wa.Y + wa.Height - height;
-                break;
-            case ShowPosition.BottomRight:
-                x = wa.X + wa.Width - width; y = wa.Y + wa.Height - height;
-                break;
-            case ShowPosition.LastPosition:
-                // 上次位置：用记录的坐标（物理像素）；没记录过则退回桌面中央
-                if (_settings.TodoLastWindowX >= 0 && _settings.TodoLastWindowY >= 0)
-                {
-                    x = _settings.TodoLastWindowX;
-                    y = _settings.TodoLastWindowY;
-                }
-                else
-                {
-                    x = wa.X + (wa.Width - width) / 2;
-                    y = wa.Y + (wa.Height - height) / 2;
-                }
-                break;
-            case ShowPosition.FollowMouse:
-                Win32Helper.GetCursorPos(out var cursor);
-                x = cursor.X - width / 2;
-                y = cursor.Y - height / 2;
-                break;
-            case ShowPosition.Center:
-            default:
-                x = wa.X + (wa.Width - width) / 2;
-                y = wa.Y + (wa.Height - height) / 2;
-                break;
-        }
-
-        // 防止超出屏幕边缘
-        if (x < wa.X) x = wa.X;
-        if (y < wa.Y) y = wa.Y;
-        if (x + width > wa.X + wa.Width) x = wa.X + wa.Width - width;
-        if (y + height > wa.Y + wa.Height) y = wa.Y + wa.Height - height;
-
-        _appWindow.Move(new Windows.Graphics.PointInt32(x, y));
+        // 位置计算统一走 WindowPositionHelper（多显示器/负数坐标/各屏缩放都在那里处理）
+        var point = WindowPositionHelper.Compute(_hWnd, _settings.TodoShowPosition,
+            DefaultWidth, DefaultHeight,
+            _settings.TodoLastWindowX, _settings.TodoLastWindowY);
+        _appWindow.Move(point);
     }
 
     /// <summary>窗口位置变化：记录到设置（防抖），供"上次位置"显示策略使用（与主窗口同款）</summary>

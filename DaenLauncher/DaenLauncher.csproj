@@ -21,7 +21,7 @@
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
     <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
     <DefaultLanguage>zh-CN</DefaultLanguage>
-    <Version>1.5.0</Version>
+    <Version>1.6.3</Version>
   </PropertyGroup>
 
   <ItemGroup>
@@ -31,6 +31,8 @@
     <PackageReference Include="CommunityToolkit.WinUI.UI.Controls.Primitives" Version="7.1.2" />
     <!-- BouncyCastle：SM4 加解密 + AES 的 CFB/OFB/CTR/GCM 模式（.NET 内置 Aes 不支持 OFB/CTR/SM4） -->
     <PackageReference Include="BouncyCastle.Cryptography" Version="2.5.1" />
+    <!-- QRCoder：二维码生成（WiFi 密码查看 / 二维码生成工具） -->
+    <PackageReference Include="QRCoder" Version="1.6.0" />
   </ItemGroup>
 
   <ItemGroup>

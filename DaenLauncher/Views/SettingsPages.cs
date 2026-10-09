@@ -1262,14 +1262,21 @@ public sealed class LauncherPage : SettingsPageBase
         MakeCard(FluentGlyphs.Sync, "Settings.AfterLaunch", "Settings.AfterLaunch.Sub", comboBox);
     }
 
-    /// <summary>构建带数值显示的滑条行（0 = 不显示）</summary>
+    /// <summary>构建带数值显示的滑条行（默认 0 = 不显示；min 可指定下限）</summary>
     private StackPanel BuildSliderRow(string labelKey, double value, double max,
-        Action<double> changed)
+        Action<double> changed, double min = 0)
     {
         var row = new StackPanel { Spacing = 4 };
         row.Children.Add(new TextBlock { Text = LocalizationService.Tr(labelKey) });
-        var slider = new Slider { Minimum = 0, Maximum = max, StepFrequency = 1, Value = value, MinWidth = 260 };
-        var valueText = new TextBlock { Text = ((int)value).ToString(), Opacity = 0.7 };
+        var slider = new Slider
+        {
+            Minimum = min,
+            Maximum = max,
+            StepFrequency = 1,
+            Value = Math.Clamp(value, min, max), // 旧配置的值可能落在新下限之外，钳制回范围
+            MinWidth = 260
+        };
+        var valueText = new TextBlock { Text = ((int)slider.Value).ToString(), Opacity = 0.7 };
         var line = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
         line.Children.Add(slider);
         line.Children.Add(valueText);
@@ -1343,6 +1350,18 @@ public sealed class LauncherPage : SettingsPageBase
             SaveAndRefreshPanelOnly();
         }));
 
+        // 项目格子宽度（需求第五十八轮）：按"能容纳多少个文字字符"算，
+        // 决定每格能显示多少字、一行能排几列（只与窗口宽度有关，与项目数量无关）
+        content.Children.Add(BuildSliderRow("Settings.Size.ItemCellChars",
+            _settings.ItemCellTextChars,
+            AppSettings.MaxItemCellTextChars,
+            v =>
+            {
+                _settings.ItemCellTextChars = v;
+                SaveAndRefreshPanelOnly();
+            },
+            AppSettings.MinItemCellTextChars));
+
         // 项目文字最多显示行数（一行/两行/三行）
         var linesCombo = new ComboBox
         {
@@ -1381,9 +1400,10 @@ public sealed class LauncherPage : SettingsPageBase
             _settings.CategoryTextSize = 14;
             _settings.SubCategoryIconSize = 18;
             _settings.SubCategoryTextSize = 14;
-            // 项目图标/文字/横向间距默认值与 AppSettings 的常量保持一致（需求）
+            // 项目图标/文字/横向间距/格子字符数默认值与 AppSettings 的常量保持一致（需求）
             _settings.ItemIconSize = AppSettings.DefaultItemIconSize;
             _settings.ItemTextSize = AppSettings.DefaultItemTextSize;
+            _settings.ItemCellTextChars = AppSettings.DefaultItemCellTextChars;
             _settings.ItemTextMaxLines = 1;
             _settings.ItemHorizontalSpacing = AppSettings.DefaultItemHorizontalSpacing;
             _settings.ItemVerticalSpacing = 8;

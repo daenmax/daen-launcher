@@ -358,6 +358,15 @@ internal static class ToolKit
         output.Text = isError ? "✗ " + text : NormalizeNewlines(text ?? "");
     }
 
+    /// <summary>
+    /// 把状态提示写进一行小字（不是文本框的提示行，如"正在读取/已获取/错误"）。
+    /// 错误同样以 ✗ 开头，成功/进行中的提示保持原样。
+    /// </summary>
+    public static void SetStatus(TextBlock status, string? text, bool isError = false)
+    {
+        status.Text = isError ? "✗ " + text : (text ?? "");
+    }
+
     /// <summary>换行统一转成 \r\n（WinUI TextBox 只认 \r\n 才显示成换行）</summary>
     public static string NormalizeNewlines(string text)
     {

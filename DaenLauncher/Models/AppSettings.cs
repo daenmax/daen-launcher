@@ -142,6 +142,57 @@ public sealed class AppSettings
     /// <summary>项目横向间距默认值</summary>
     public const double DefaultItemHorizontalSpacing = 12;
 
+    /// <summary>项目格子宽度默认值（按能容纳多少个文字字符算）</summary>
+    public const double DefaultItemCellTextChars = 6;
+
+    /// <summary>格子宽度可调的字符数下限（1 = 只放一个字，实际会被最小宽度兜住）</summary>
+    public const double MinItemCellTextChars = 1;
+
+    /// <summary>格子宽度可调的字符数上限（再大列数会少到只有一两列，没有实用价值）</summary>
+    public const double MaxItemCellTextChars = 30;
+
+    /// <summary>图标和文字都不显示时的格子内容保底宽度（避免格子宽度算成 0）</summary>
+    public const double ItemCellMinContentWidth = 48;
+
+    /// <summary>项目按钮的内边距（四边相同，逻辑像素）</summary>
+    public const double ItemButtonPadding = 6;
+
+    /// <summary>项目按钮的边框厚度（单边，逻辑像素）</summary>
+    public const double ItemButtonBorderThickness = 1;
+
+    /// <summary>
+    /// 项目按钮自身占用的横向空间（左右内边距 + 左右边框）。
+    /// 算格子宽度时必须加上，否则文字可用宽度会比"N 个字符"少这么一点、被提前省略。
+    /// </summary>
+    public const double ItemButtonChromeWidth =
+        (ItemButtonPadding + ItemButtonBorderThickness) * 2;
+
+    /// <summary>
+    /// 项目格子宽度（逻辑像素）：由"项目图标大小 / 项目文字大小 / 横向间距 / 格子字符数"共同决定。
+    /// 文字在该宽度内换行/超出省略；一行能放几列只由本宽度和窗口宽度决定，
+    /// 与项目数量、文字长短无关（这样各子分类的列数和列位置完全一致，需求）。
+    /// </summary>
+    public double ComputeItemCellWidth()
+    {
+        // 凸出到下限之外的历史值钳制回范围（本设置是后加的，默认值兜底）
+        var chars = ItemCellTextChars <= 0
+            ? DefaultItemCellTextChars
+            : Math.Clamp(ItemCellTextChars, MinItemCellTextChars, MaxItemCellTextChars);
+
+        var textWidth = ItemTextSize > 0 ? ItemTextSize * chars : 0;
+        var iconWidth = ItemIconSize > 0 ? ItemIconSize : 0;
+        var contentWidth = Math.Max(iconWidth, textWidth);
+        if (contentWidth <= 0) contentWidth = ItemCellMinContentWidth;
+        return contentWidth + ItemButtonChromeWidth + ItemHorizontalSpacing;
+    }
+
+    /// <summary>
+    /// 项目格子按"能容纳多少个文字字符"计算的宽度系数（需求：设置页滑条可调）。
+    /// 这是"格子要多宽"的唯一调节点：调大 → 每格显示更多字、一行列数减少；调小反之。
+    /// 默认 6：默认字号 14 下每格约 6 个中文（约 12 个西文），常见 1000px 窗口能排 7 列左右。
+    /// </summary>
+    public double ItemCellTextChars { get; set; } = DefaultItemCellTextChars;
+
     /// <summary>项目图标大小（0 = 不显示图标）</summary>
     public double ItemIconSize { get; set; } = DefaultItemIconSize;
 
@@ -165,6 +216,12 @@ public sealed class AppSettings
     public ItemTextPosition ItemTextPosition { get; set; } = ItemTextPosition.Below;
 
     // ===== 窗口状态（自动保存） =====
+
+    /// <summary>
+    /// "上次窗口位置"未记录时的哨兵值。
+    /// 不能用 0 或 &gt;= 0 判断——多显示器下副屏在主屏左侧/上方时坐标是负数。
+    /// </summary>
+    public const int WindowPositionNotSet = -1;
 
     /// <summary>主窗口宽度</summary>
     public double WindowWidth { get; set; } = 920;

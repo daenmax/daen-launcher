@@ -188,62 +188,11 @@ public sealed partial class ClipboardWindow : Window
     /// <summary>按设置的显示位置定位窗口（与待办窗口同款）</summary>
     private void ComputeShowPosition()
     {
-        var displayArea = DisplayArea.GetFromWindowId(
-            Microsoft.UI.Win32Interop.GetWindowIdFromWindow(_hWnd),
-            DisplayAreaFallback.Nearest);
-        var wa = displayArea.WorkArea;
-
-        var scale = GetDpiScale();
-        var width = (int)(_settings.ClipboardWindowWidth * scale);
-        var height = (int)(_settings.ClipboardWindowHeight * scale);
-
-        int x, y;
-        switch (_settings.ClipboardShowPosition)
-        {
-            case ShowPosition.TopLeft:
-                x = wa.X; y = wa.Y;
-                break;
-            case ShowPosition.TopRight:
-                x = wa.X + wa.Width - width; y = wa.Y;
-                break;
-            case ShowPosition.BottomLeft:
-                x = wa.X; y = wa.Y + wa.Height - height;
-                break;
-            case ShowPosition.BottomRight:
-                x = wa.X + wa.Width - width; y = wa.Y + wa.Height - height;
-                break;
-            case ShowPosition.LastPosition:
-                // 上次位置：用记录的坐标（物理像素）；没记录过则退回桌面中央
-                if (_settings.ClipboardLastWindowX >= 0 && _settings.ClipboardLastWindowY >= 0)
-                {
-                    x = _settings.ClipboardLastWindowX;
-                    y = _settings.ClipboardLastWindowY;
-                }
-                else
-                {
-                    x = wa.X + (wa.Width - width) / 2;
-                    y = wa.Y + (wa.Height - height) / 2;
-                }
-                break;
-            case ShowPosition.FollowMouse:
-                Win32Helper.GetCursorPos(out var cursor);
-                x = cursor.X - width / 2;
-                y = cursor.Y - height / 2;
-                break;
-            case ShowPosition.Center:
-            default:
-                x = wa.X + (wa.Width - width) / 2;
-                y = wa.Y + (wa.Height - height) / 2;
-                break;
-        }
-
-        // 防止超出屏幕边缘
-        if (x < wa.X) x = wa.X;
-        if (y < wa.Y) y = wa.Y;
-        if (x + width > wa.X + wa.Width) x = wa.X + wa.Width - width;
-        if (y + height > wa.Y + wa.Height) y = wa.Y + wa.Height - height;
-
-        _appWindow.Move(new Windows.Graphics.PointInt32(x, y));
+        // 位置计算统一走 WindowPositionHelper（多显示器/负数坐标/各屏缩放都在那里处理）
+        var point = WindowPositionHelper.Compute(_hWnd, _settings.ClipboardShowPosition,
+            _settings.ClipboardWindowWidth, _settings.ClipboardWindowHeight,
+            _settings.ClipboardLastWindowX, _settings.ClipboardLastWindowY);
+        _appWindow.Move(point);
     }
 
     /// <summary>窗口位置/尺寸变化：记录到设置（防抖），供"上次位置"和尺寸记忆使用</summary>

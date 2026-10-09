@@ -28,7 +28,8 @@ DaenLauncher/
   Services/  DataPathService、JsonStore、SettingsService、LauncherDataService、
              LocalizationService、IconService、ItemIconService、LnkResolver、
              LauncherRunner、AutoStartService、TrayService、InputHookService、
-             Win32Helper、DropResolver、DataService、
+             Win32Helper、DropResolver、DataService、WindowPositionHelper、
+             QrCodeService、WifiService、TimeSyncService、
              ThemeService、AppInfoService、RelayCommand
   Assets/    appconfig.json、logo、设置图标（全部 EmbeddedResource）
   Languages/ zh-CN.json、en-US.json（EmbeddedResource，启动时释放到 data\language）
@@ -598,6 +599,161 @@ build.bat / clean.bat   双击可用的编译/清理脚本
 - **语言**：zh/en 各 +20 键（Settings.Proxy.* 20 项，630 键对齐 0 缺失）。版本号 1.4.4 → 1.5.0。
 - **README 同步**（第五十~五十五轮）：多种项目类型（右键添加项目/UWP 商店应用选择器）、智能图标完整能力（UWP 高清图标/协议处理程序图标/favicon/Steam 游戏专属图标/刷新图标）、右键菜单新项（创建桌面快捷方式/刷新图标）、悬停提示、设置-常规网络代理。
 
+## 最新变更（2026-10-08 第五十六轮：3 个 BUG 修复 + 3 个新常用工具）
+
+### BUG1 多显示器"上次位置"失效（副屏永远居中）
+
+- **用户现象**：多显示器电脑上显示位置选"上次位置"，主屏正常；副屏每次显示都在副屏正中央。
+- **两个叠加根因**（都在 `ComputeShowPosition` 里）：
+  1. **判断"是否记录过位置"用了 `>= 0`**——虚拟桌面坐标系里副屏在主屏左侧/上方时 X/Y 是 **负数**，保存的正确值（如 -1700）被这个判断当成"没记录过"，直接落到居中分支 → 每次都回到副屏中央（正是用户看到的现象）；
+  2. **钳制用的是"窗口当前所在显示器"的工作区**（`DisplayArea.GetFromWindowId`，恢复时窗口还在主屏）——即使坐标是正数，`x + width > 主屏右边界` 也会把副屏坐标硬拉回主屏。只有副屏在主屏右下方时碰巧不被钳制，所以表现为"部分情况正常"。
+  - 附带：尺寸换算用的 `GetDpiForWindow`（窗口当前所在屏的 DPI）在混合缩放的副屏上会算错宽高。
+- **修复：新增 `Services/WindowPositionHelper.cs`（六处重复逻辑收敛成一份）**：
+  - "上次位置"分支先 `DisplayArea.GetFromPoint(记录坐标)` **按记录的坐标找到那块显示器**，再用它的工作区做 `Math.Clamp`；
+  - "是否记录过"统一用哨兵值 `AppSettings.WindowPositionNotSet`（-1，新增常量），**负数坐标是合法值**；
+  - 尺寸换算新增 `Win32Helper.GetDpiScaleForPoint(x, y)`（`MonitorFromPoint` + `Shcore.GetDpiForMonitor`，取目标屏的 DPI）；
+  - "跟随鼠标"也顺带修正为按**鼠标所在显示器**的工作区钳制（原来用窗口所在屏）。
+- **六个窗口全部改为调用该 Helper**：主窗口、待办、随手记、剪贴板、常用工具、必应壁纸（此前六份代码各自复制粘贴同一段错误逻辑）。
+- **实测**：把 `LastWindowX` 设为 -1700（模拟主屏左侧的副屏）启动，窗口按 LastPosition 分支处理（本机只有 0~2560 单屏，X 被钳制为 0）；修复前同样的输入会走进居中分支（X≈820）。
+
+### BUG2 项目文字被截断（"启动oracle"只显示"启"）
+
+- **用户现象**：一行内容少、格子看起来很宽，但"启动oracle"只显示"启"字，同行的"启动redis"却完整。
+- **根因**：`BuildItemText` 给文字块写死了 `MaxWidth = Math.Max(50, ItemIconSize * 1.8)`（默认图标 32 → **57.6px**），与格子实际宽度无关；`TextTrimming = CharacterEllipsis` 就在这 57.6px 上截断。"启动redis"比它窄所以完整显示。所谓"格子很宽"是 `UniformWrapPanel` 给的格子宽，文字块自己仍被卡在 57.6px。
+- **修复**：去掉这个 MaxWidth（文字宽度改由格子约束决定）。
+- **连带问题**：去掉上限后，一个超长名字会让"等宽格子"撑到整行宽、面板退化成单列。
+  本轮（第五十六轮）先按"格子宽度自适应内容 + 至少 2 列"实现，**但方向是错的**——
+  格子宽度随内容变化会导致"项目数量/文字长短影响列数与列位置"，正是用户第五十七轮反馈的
+  "两个子分类一个 2 列一个 3 列、项目少的被拉伸"问题。**第五十七轮已改为"格子宽度是固定常量、
+  列数只由窗口宽度决定"的正确模型**（详见第五十七轮）。
+
+### BUG3 拖入 .bat 快捷方式后路径是 .lnk（不是真实目标）
+
+- **用户现象**：拖桌面"START-HERE.bat - 快捷方式"进来，项目路径存的是 `...\START-HERE.bat - 快捷方式.lnk`，而真实目标是 `D:\Program Files\Strata-main\START-HERE.bat`。
+- **根因**：`DropResolver.ResolveShortcutFile` 的类型判定只有 `.exe` 一支（`target.EndsWith(".exe")`），**非 exe 的本地文件目标全部落到最后的兜底分支**——那里 return 的是 `path`（快捷方式自己）+ `Type = Lnk`，已经解析出来的 `target`/`args` 被丢弃。.bat/.cmd/.ps1/.msc 以及普通文件（.txt 等）全中招。
+- **修复**（`DropResolver.cs`）：
+  - `.exe` 判断之后新增"**目标是存在的本地文件**"分支 → `Path = target, Type = File`（启动走 ShellExecute，系统按扩展名关联执行，与 .txt 等一致）；
+  - 目标是文件夹时也直接识别为 `Folder`（原来会退回 .lnk）；
+  - 目标不存在（快捷方式指向的文件已被删除）才保留快捷方式本身为 `Lnk`，保证仍可点击启动；
+  - 浏览器噪音参数过滤提取为 `StripBrowserNoiseArguments`。
+- **连带排查修复（同类问题一处）**：右键"添加项目 → 文件"选中 .lnk/.url 时**不会解析目标**（只有"快捷方式"菜单项会）→ 现在两个菜单项都统一走 `ResolveShortcutFile`，且从"文件"菜单选中 .exe 也会正确标为 Exe 类型。
+- **存量数据自动迁移**：`LauncherDataService.NormalizeLegacyShortcutPaths()`——启动/导入重载时把"Path 指向存在 .lnk/.url 的 Lnk 类型项目"重新解析成真实目标（只在解析结果确实不同时才改，解析不出来保持原样）；与旧有的 `NormalizeLegacyUrlTypes` 共用一个改动标记。
+- **实测**：独立控制台工程**直接 Compile Include 真实源文件**，对 8 种快捷方式断言全过——.exe ✓、.exe 带参数 ✓、.bat ✓（本次核心）、.txt ✓、文件夹 ✓、目标不存在回退 .lnk ✓、.url 网址 ✓、.url 协议(steam) ✓。
+
+### 新工具1 已连接 WiFi 密码查看（其他常用）
+
+- **服务 `Services/WifiService.cs`**：调系统 `netsh` 解析文本（参数化 `ProcessStartInfo`，不经 shell）。
+  - 列表 `netsh wlan show profiles`；详情 `netsh wlan show profile name="X" key=clear` 取"关键内容"=密码、"身份验证"=加密方式。
+  - **netsh 输出编码跟随系统区域设置**（中文 Windows 常见 GBK）→ 读原始字节后先按 UTF-8 严格解码，失败回退 `CodePagesEncodingProvider` + `CurrentCulture.TextInfo.ANSICodePage`（需 `Encoding.RegisterProvider`，.NET Core 默认不带 GBK）。
+  - 关键字中英文双匹配（名称/Name、关键内容/Key Content、身份验证/Authentication）；超时 8s 防界面卡死。
+  - **隐藏网络判定**：必须匹配"**未广播**"/"not broadcasting"——普通网络那行是"只在网络广播时连接"，只匹配"广播"会全部误判为隐藏（实测踩到）。
+- **工具页 `WifiPasswordTool`**（`Views/Tools/NetworkTools.cs`）：顶部"刷新列表"按钮 + 状态行 + 列表（名称 + 加密方式，卡片样式）；**右键行**弹菜单"查看密码和二维码/复制密码"。
+  - 弹窗：二维码（260px，手机扫码直接连网）+ 名称/密码/身份验证三行（值用只读 TextBox 以便选中复制）；底部"复制二维码内容"+"关闭"。
+  - netsh 调用放 `Task.Run` 后台线程；页面缓存导致 `Loaded` 会多次触发 → `_loadedOnce` 标记只自动读一次。
+  - **本机实测（UIA + 截图）**：读到 **97 个**已连接 WiFi、emoji SSID（🐷🍊🌹）完整无乱码、弹窗二维码 260×260 渲染正常、密码 `q12345678` 与 netsh 一致。
+
+### 新工具2 北京时间同步（其他常用）
+
+- **服务 `Services/TimeSyncService.cs`**：
+  - **NTP/SNTP 授时**（RFC 4330 简化客户端）：UDP 48 字节包（首字节 0x1B = LI0/VN4/Mode3），从响应 **字节 40..43**（Transmit Timestamp 大端秒数）取时间，减去 1900→1970 的 2208988800 秒偏移，再加**往返时间的一半**做补偿。
+  - **健壮性（实测教训）**：UDP 丢包常见 → **每个 IP 重试 3 次**；域名解析出多地址时逐个尝试且 **IPv4 优先**（只有 IPv6 的服务器在纯 IPv4 网络必然失败）。国家授时中心实测要重试才通。
+  - **HTTP 时间 API**：走 `ProxyService.CreateHttpClient`（遵循软件代理设置）；响应里正则找时间戳，字段名各接口不同所以用宽松集合 `t|currentTime|timestamp|now|sysTime`（淘宝 `t`、苏宁 **`currentTime`**——只匹配 `t` 会漏掉苏宁），兜底读 HTTP 响应的 `Date` 头。
+  - **实测可用清单**（2026-10-08 本机同时验证直连与代理）：NTP = 国家授时中心 ntp.ntsc.ac.cn、阿里云 ntp.aliyun.com、腾讯云 ntp.tencent.com、华为云 **ntp.cn-north-1.myhuaweicloud.com**、中国 NTP 公共池 cn.pool.ntp.org、教育网 time.edu.cn；HTTP = 淘宝 **https://acs.m.taobao.com/gw/mtop.common.getTimestamp/**、苏宁 https://f.m.suning.com/api/ct.do、百度 https://www.baidu.com（响应头）。
+  - **踩坑**：`ntp.huaweicloud.com` **域名不存在**（多个公共 DNS 均 NXDOMAIN），华为云公网 NTP 要用区域域名且部分区域是 VPC 内网不可达 → 选 cn-north-1；`api.m.taobao.com` 那个旧接口本机直连 TLS 失败 → 换 acs 域名。
+  - **同步本地时间**：`ProcessStartInfo{ UseShellExecute=true, Verb="runas" }` 提权跑 PowerShell `Set-Date`（会弹 UAC）。**`Verb="runas"` 必须配 `UseShellExecute=true`**，且此组合**不能重定向输出** → 改为"事后重读时钟校验"判断成功（容差 10s）；UAC 被拒的错误码 1223 = ERROR_CANCELLED 单独提示。同步的是同一 UTC 瞬间，本地时区不变。
+- **工具页 `TimeSyncTool`**：本地时间/北京时间两个大字号时钟（每秒刷新）+ 差值文字（快/慢 N 秒，<1s 显示"一致"）+ 获取方式下拉（NTP/HTTP，切换时重建服务器下拉）+ 服务器下拉 + "同步本地时间"按钮；进入界面自动取一次（静默失败）。
+- **实测**：6 个 NTP 源 + 3 个 HTTP 源全部真实取到时间（本机 UTC 15:0x ↔ 本地 23:0x，即北京时间）；"同步本地时间"未实际提权执行（避免改动本机时钟），仅代码路径校验。
+
+### 新工具3 二维码生成（其他常用）
+
+- **服务 `Services/QrCodeService.cs`**：NuGet 新增 **QRCoder 1.6.0**（`PngByteQRCode` 直接产出 PNG 字节，**以 PNG 字节为唯一产物**——显示和保存共用，不落临时文件、不依赖 System.Drawing 渲染器）。
+  - 尺寸：`pixelsPerModule = max(4, 目标尺寸 / (模块数 + 8))`（+8 = 上下各 4 模块静区，`drawQuietZones: true` 必开，否则很多扫码器认不出）；实际边长取模块整数倍保证边缘锐利。
+  - 纠错级别对外用自建枚举 `QrCodeService.ErrorLevel`（Low/Medium/Quartile/High），**不把 QRCoder 类型泄漏到界面层**。
+  - `BuildWifiPayload`：`WIFI:T:加密方式;S:名称;P:密码;H:是否隐藏;;`，名称/密码里 `\ ; , : "` 必须转义（按规范加反斜杠）。
+- **工具页 `QrCodeTool`**：内容输入区 + 纠错级别下拉（默认 M）+ "生成"（蓝色）/ "保存图片" + 状态行 + 白底圆角二维码图片区 + "复制结果"。
+  - 保存走 `FileSavePicker`（绑主窗口句柄），**必须 `FileMode.Create`**（另存为对话框会预创建空文件，`CreateNew` 会抛 IOException——第七轮踩过的同类坑）。
+- **实测（独立解码器验证，最强证据）**：用 **ZXing.Net**（完全独立的第三方解码器）把 QRCoder 生成的图**解回原文**——7 个用例（网址/中文/单字/500 字符/ECC L·M·Q·H/WiFi 载荷）**全部 PASS 逐字相等**；另验证 PNG 签名 `89 50 4E 47…`、各等级容量边界（4000 字符在 M/Q/H 报 `DataTooLongException` 被正确捕获为可读提示）、WiFi 转义断言通过。
+
+### 编译坑 / 教训（第五十六轮）
+
+- **`ProcessStartInfo` 的 `Verb = "runas"` 与输出重定向互斥**：必须 `UseShellExecute = true`，此时不能再设 `RedirectStandardOutput/Error`（运行时会抛），失败判定要另想办法（重读状态校验）。
+- **`Windows.Storage.Streams` 的 buffer 转换在这版 SDK 上不顺手**：`IBuffer.AsStream()` / `WriteableBitmap.PixelBuffer` 直接操作都编译不过 → 结论是**不要自己拼像素**，用库的 PNG 编码器产字节、再 `DataWriter` + `BitmapImage.SetSourceAsync` 显示（`SetSource` 同步版也可）。
+- **QRCoder 命名空间**：`QRCode`/`PngByteQRCode` 渲染类不在 `QRCoder` 根命名空间能直接用的位置，`QRCode` 类会 CS0246 → 用 `PngByteQRCode`（其 `GetGraphic(int, bool drawQuietZones)` 重载实测可用）。
+- **netsh 输出编码**是中文 Windows 的实际坑（GBK），必须注册 CodePagesEncodingProvider；`UTF8Encoding(false, true)` 的严格模式用来做"能 UTF-8 就 UTF-8"的探测。
+- **UIA 测试脚本**：PowerShell 变量 **`$TRUE`/`$true` 是内建常量不能自建**（会 `MethodArgumentConversionInvalidCastArgument`）；Heredoc 写 C# 正则会被 shell 吃掉反斜杠（改用 Write 工具或 python 写文件）；中文/emoji 经控制台输出会丢 → **结果写 UTF-8 文件再由 python 读**才是可靠验证方式。
+- **语言键删改必须校验**：给 JSON 插/删键后用 `json.load` 复验 + 键集合对比 + "代码引用的键是否都有定义"的反向扫描（本轮据此发现我多加了一个没人用的 `Tools.Wifi.Empty` 并删除）。
+
+### 语言 / 版本
+
+- zh/en 各 **+64 键**（Tools.Wifi.* 16 / Tools.Time.* 30 / Tools.Qr.* 13 + 3 个工具名），删掉 1 个未使用的 `Tools.Wifi.Empty` → **693 键两边对齐 0 缺失**，无空值。
+- 版本号 1.5.0 → **1.6.0**；Debug/Release 均 0 错误 0 警告；Release 单文件 exe（136MB）已复制 `build\DaenLauncher.exe`，探针确认全部新服务/新工具/新语言键在中（US 堆字符串要按 **utf-16-le** 探，ASCII 会假阴性——第四十七轮已记）。
+
+## 最新变更（2026-10-08 第五十七轮：修正平铺布局模型——格子宽度固定、列数只由窗口宽度决定）
+
+> **用户反馈（第五十六轮 BUG2 的修复方向错了）**：我上一轮把"格子宽度"改成去适应文字内容，结果**两个项目数量相近的子分类一个 2 列一个 3 列**，明明窗口宽度本可以容纳更多列。用户明确要求的模型是：
+> **文字长度取决于格子宽度 → 格子宽度取决于（项目图标大小、项目文字大小、横向间距、纵向间距）→ 每行几列取决于（格子宽度 + 窗口宽度）**；
+> 列数**不得**取决于项目数量或文字长短；每列必须对齐；**绝不能因为某子分类项目少就把格子拉伸平分整行**。
+
+- **布局模型重写**（`Controls/UniformWrapPanel.cs`）：
+  - 新增 `CellWidth` 属性 = **固定格子宽度**（平铺模式格子宽度不再随内容/可用宽度变化）；
+  - `MeasureOverride` 用"格子宽度 − 该子元素左右外边距"作为**宽度约束**去测量子元素 → 文字在格子内换行/超出省略（文字宽度由格子决定，符合用户模型）；
+  - 列数 = `可用宽度 ÷ 格子宽度` 向下取整，**只由窗口宽度决定**（不再 `Math.Min(列数, 子元素数量)` 收敛，这正是"项目少的子分类列数变少/被拉伸"的根源）；
+  - 平铺模式 `ArrangeOverride` 用固定 `_cellWidth` 排列，**末行不满不再平分铺满**（去掉"最后一行为铺满而拉伸"的旧行为）→ 所有子分类列位置恒定、天然对齐；
+  - 列表模式（`FixedColumns = 1`）保持原语义：格子 = 整行平分、铺满，悬停高亮满行。
+- **格子宽度的来源**（`Models/AppSettings.cs`）：新增 `ComputeItemCellWidth()` ——
+  `max(项目图标大小, 项目文字大小 × ItemCellTextChars) + 按钮内边距边框 + 横向间距`。
+  - 新常量 `ItemCellTextChars = 9`（"格子能容纳几个文字字符"，默认字号 14 下每格约 9 个中文 / 18 个西文；**这是唯一的"格子要多大"调节点**，不受项目数量/文字长短影响）；`ItemCellMinContentWidth = 48`（图标文字都不显示时的保底）、`ItemButtonPadding = 6`、`ItemButtonBorderThickness = 1`、`ItemButtonChromeWidth`（算格子宽必须加上按钮自身的内边距+边框，否则文字可用宽度少一点点会被提前省略）。
+  - **纵向间距不参与格子宽度**（它只影响行距）——用户提到的四项设置里，前三项决定格子宽、纵向间距决定行距。
+- **面板创建统一走一个工厂**（`MainWindow.CreateItemsPanel(settings)`）：`BuildItemsHost` 和拖放路径（`PanelHost_Drop`）此前各自 new 面板、易漂移，现在共用同一个工厂（平铺=固定格子宽、列表=固定 1 列）。
+- **实测（真实数据 + 截图 + UIA 坐标）**：用用户提供的 `build/data`（18/9/20/7/7/10/3/2… 项的子分类）验证——
+  - 同一分类下多个子分类**列数完全一致且左对齐**（如 1300px 宽时两子分类都是 6 列）；
+  - **项目少不拉伸**：9 项的子分类第 3 行只有 3 个，仍从第 1 列起排、不铺满整行；
+  - **列数只随窗口宽度变化**：900px → 4 列、1041px → 5 列、1300px → 6 列、1500px → 9 列，两个子分类始终同步；
+  - 列表模式仍为一行一个、文字完整不截断；Tab 风格与卡片风格表现一致。
+- **教训（重要）**："为了多显示文字而把格子宽度改成自适应内容"是错的方向——**等宽网格的格子宽度必须是外生常量**，让内容去适应格子；一旦让格子去适应内容，列数/列位置就会随数据变化，"对齐"这个需求目标必然失败。
+
+## 最新变更（2026-10-09 第五十八轮：平铺格子宽度加设置页滑条）
+
+- **需求**：第五十七轮已验证布局模型正确（用户确认"效果非常棒"），按当时提议给"每格显示多少字"加一个设置页滑条。
+- **实现**：
+  - `AppSettings.ItemCellTextChars` 由 **const 常量改为可序列化的属性**（默认值常量 `DefaultItemCellTextChars = 9`；新增 `MinItemCellTextChars = 1`、`MaxItemCellTextChars = 30`）。**旧 settings.json 没有这个键时会用属性默认值 9**，不影响老用户配置；`ComputeItemCellWidth()` 里再 `Math.Clamp` 兜一层，越界值自动纠正。
+  - 设置页"显示大小"卡片新增滑条 **"项目格子宽度（每格字符数）"**（范围 1~30，默认 9），排在"纵向间距"之后、"项目文字最多显示行数"之前——按"先定格子尺寸、再定行数"的逻辑顺序。拖动即时 `SaveAndRefreshPanelOnly()` 生效。
+  - `BuildSliderRow` 新增可选参数 `min`（默认 0，保持其它滑条原语义），构造时对值做 `Math.Clamp` 防越界。
+  - "恢复默认"按钮一并重置该项为 `AppSettings.DefaultItemCellTextChars`。
+- **实测（UIA 真实拖动 + 截图）**：滑条 RangeValue 范围实测 `min=1 max=30`、初值 9；设 18 后格子变宽、列数由 5 降到 2，长名字（"大恩每日必应壁纸自动更换""ContextMenuManager.NET.4"）完整显示；设 5 后格子收窄、列数增多；值正确落盘 settings.json；恢复 9 后回到 5 列。设置页确认新滑条标题文字存在（共 9 个滑条）。
+- **语言**：zh/en 各 **+1 键**（`Settings.Size.ItemCellChars`，694 键两边对齐 0 缺失）。
+
+## 最新变更（2026-10-09 第五十九轮：默认格子宽度改 6 + 面板右键「刷新项目」）
+
+- **需求1 默认格子宽度 9 → 6**：`AppSettings.DefaultItemCellTextChars = 6`（默认字号 14 下每格约 6 个中文，常见 1000px 窗口约 7 列，比原来的 5 列更紧凑）。**注意：这是"默认值"——已经用过滑条的老用户配置里已有 `ItemCellTextChars`，不会被改动；只有没这个键的（老版本升级上来的）才会拿到新默认 6。**
+- **需求2 新增「刷新项目」菜单项**（用户原话：以前只有重启软件才会检测，需要手动刷新）：
+  - 位置：**右键面板空白处**的弹出菜单里，紧跟在「添加项目」子菜单之后（加了一条分隔线）。
+  - 作用范围：**指针所在的那个子分类**（与「添加项目」用同一套 `FindSubAtPanelPointer` 命中逻辑，即卡片/Tab 头 > 当前 Tab > 第一个子分类）。
+  - 做两件事（`MainWindow.RefreshSubCategoryItemsAsync`）：
+    1. **重新检测存在性**——`LauncherDataService.RecheckMissing(sub)`（新方法，逐项 `IsItemMissing` 并写回 `IsMissing`），纯 IO 放后台线程执行，返回 (总数, 失效数)；
+    2. **清图标缓存并重建面板**——逐项 `ItemIconService.DeleteCache` + `ClearFailedFavicon`（网址类型必须清会话内失败记录，否则本次会话永远不会重新联网抓 favicon），然后 `RefreshPanelOnly()` 重建面板，图标按最新状态重新提取：正常的取真实图标，失效的显示「项目无法找到」。
+  - 反馈：**只有存在失效项目时才弹提示**（「已刷新 N 个项目，其中 M 个无法找到（图标已标记）」），全部正常则静默（避免每次刷新都弹窗）；子分类为空时提示「这个子分类里还没有项目」。
+- **实测（真实 UI，截图 + 对话框确证）**：
+  - 造两个真实 exe 项目（`WillVanish.exe` / `Stays.exe`）启动 → 两个都是正常图标；
+  - **启动后删掉 `WillVanish.exe`**（模拟程序被卸载）→ 右键空白处点「刷新项目」→ 该项目图标变成 **「项目无法找到」（⚠）**、另一个保持正常图标，并弹出「已刷新 2 个项目，其中 1 个无法找到（图标已标记）」；
+  - **把文件放回去**再点「刷新项目」→ 图标**恢复成正常的记事本图标**（反向也成立）。
+  - 空白处右键菜单确认同时含「添加项目」与「刷新项目」。
+- **语言**：zh/en 各 **+3 键**（`Main.Item.RefreshItems` / `.Empty` / `.FoundMissing`，697 键两边对齐 0 缺失）。
+
+### 语言 / 版本（第五十九轮）
+
+- 版本号 1.6.2 → **1.6.3**；Debug/Release 均 0 错误 0 警告；Release 单文件 exe 已复制 `build\DaenLauncher.exe`。
+
+### 语言 / 版本（第五十八轮）
+
+- 版本号 1.6.1 → **1.6.2**；Debug/Release 均 0 错误 0 警告；Release 单文件 exe 已复制 `build\DaenLauncher.exe`（FileVersion 1.6.2.0）。
+- README 更新"灵活布局"条目：补充等宽网格规则（列数只由窗口宽度决定、各子分类对齐、项目少不拉伸）+ 新滑条说明。
+
+### 语言 / 版本（第五十七轮）
+
+- 无新增语言键（仍 **693 键两边对齐**）。
+- 版本号 1.6.0 → **1.6.1**；Debug/Release 均 0 错误 0 警告；Release 单文件 exe 已复制 `build\DaenLauncher.exe`（FileVersion 1.6.1.0）。
+
 ## 当前进度
 - ✅ 需求1.md 主体 + 十八轮改进/修复全部完成；**"资源管理器菜单"需求已在第十九轮彻底移除（用户决定放弃）**。
 - ✅ 第二十轮：待办功能完成（窗口 + 本地存储 + webnote 云同步 + 设置页）。
@@ -626,6 +782,10 @@ build.bat / clean.bat   双击可用的编译/清理脚本
 - ✅ 第五十三轮：项目右键"刷新图标"（清缓存重新提取全类型支持；网址类型同时清会话内失败记录允许立即重联网）。
 - ✅ 第五十四轮：修复 .url 拖入误判"网址"（steam:// 现在正确判为协议）+ 记录 .url 的 IconFile 用游戏专属图标 + 旧数据自动迁移（非 http/https 的网址条目 → 协议）。
 - ✅ 第五十五轮：设置-常规新增"代理"配置（四种模式默认系统代理，HTTP/SOCKS5 测试通过才能保存）；新 ProxyService 统一全局代理（FaviconService/WebNoteClient/WallpaperService 已接入，配置变化立即生效）。
+- ✅ 第五十六轮：**3 个 BUG 修复**（多显示器"上次位置"负数坐标/钳制错屏 → 新 WindowPositionHelper 六窗口共用；项目文字被 57.6px 死上限截断 → 去上限 + UniformWrapPanel 加测量约束与最少 2 列；拖入 .bat/.txt 快捷方式存成 .lnk 路径 → 非 exe 文件目标识别为 File/文件夹识别为 Folder + "添加项目-文件"也解析快捷方式 + 存量数据自动迁移）；**3 个新工具**（已连接 WiFi 密码查看 / 北京时间同步 / 二维码生成）。版本 1.6.0。
+- ✅ 第五十七轮：**修正平铺布局模型**（格子宽度改为固定常量 `AppSettings.ComputeItemCellWidth()`，列数只由"窗口宽度 ÷ 格子宽度"决定；末行不再拉伸铺满；所有子分类列数一致且对齐；项目少不再被平分）。版本 1.6.1。
+- ✅ 第五十八轮：平铺格子宽度加设置页滑条（`ItemCellTextChars` 改为可配置属性，范围 1~30 默认 9，随时拖动即时生效 + 恢复默认）。版本 1.6.2。
+- ✅ 第五十九轮：默认格子宽度 9→6（已有配置不受影响）+ 面板右键「刷新项目」（重新检测存在性 + 重提图标，失效换「项目无法找到」、恢复则换回正常图标，仅失效时提示）。版本 1.6.3。
 - ⚠️ 待用户实测：第十二轮（覆盖 70% 触发重排 + 滑动动画）、**第二十~三十一轮（待办/随手记全部交互、云同步、附属功能栏配置、图标选择器）**、**第三十八轮（剪贴板全部交互）**。
 - 📌 回滚点：commit 991b8b1（第十一轮拖拽可用版本）。第十二轮起改动尚未提交，确认手感后再提交新检查点。
 
@@ -637,6 +797,9 @@ build.bat / clean.bat   双击可用的编译/清理脚本
 - 关于页"应用更新"检查/自动更新。
 
 ## 关键决策
+- **窗口显示位置计算统一走 `WindowPositionHelper`（第五十六轮起长期约束）**：任何窗口的"显示位置"都必须调用它，**禁止再各窗口复制粘贴一段 `DisplayArea.GetFromWindowId` 的定位代码**（该模式曾复制到 6 个窗口并携带两个多显示器 BUG）。要点：判断"上次位置是否记录过"用 `AppSettings.WindowPositionNotSet`（-1）而非 `>= 0`（副屏坐标可以是负数）；钳制用**目标坐标所在显示器**的工作区（`DisplayArea.GetFromPoint`）；尺寸换算用 `Win32Helper.GetDpiScaleForPoint` 取目标屏 DPI。
+- **等宽网格的格子宽度必须是"外生常量"，不许由内容决定（第五十七轮，长期约束）**：平铺模式的格子宽度只能来自设置（`AppSettings.ComputeItemCellWidth()`，由项目图标大小/文字大小/横向间距算出），**一行几列 = 窗口宽度 ÷ 格子宽度**，与项目数量、文字长短完全无关；末行不满**不许拉伸铺满**。任何"让格子去适应文字内容"的做法都会让列数/列位置随数据漂移，破坏对齐（第五十六轮的错误方向、第五十七轮修正，务必不要再犯）。测量子元素时必须给宽度约束（= 格子宽 − 外边距），否则文字不换行、长名字会把格子撑爆。
+- **快捷方式解析的唯一入口是 `DropResolver.ResolveShortcutFile`（第五十六轮）**：拖拽、右键"添加项目-快捷方式"、"添加项目-文件"（选中 .lnk/.url 时）都必须走它，不允许直接把 `.lnk` 路径存进项目。**任何"目标类型判定"的新分支都要放在 `.exe` 判定之后、兜底分支之前**——兜底分支返回的是快捷方式自身（Type=Lnk），漏判就会退化成"指向 .lnk"。
 - **新窗口必须接入三项联动（第二十三轮起长期约束）**：① `RefreshTitle()` 并加入 `App.RefreshAllTitles()`（自定义软件标题）；② 窗口材质通过 `App.ApplyBackdropEverywhere()` 统一应用；③ 主题通过 `App.ApplyThemeEverywhere()`。已接入：主窗口、设置窗口、待办窗口。
 - **不内置 WrapPanel**：2.3.9 的 WinUI 没有 → 自己写了 `Controls/WrapPanel.cs`。
 - **托盘菜单手动弹出**：`MenuActivation=None` + `RightClickCommand` 里 `ShowContextMenu(光标位置)`，避免位置不准。
@@ -671,3 +834,11 @@ build.bat / clean.bat   双击可用的编译/清理脚本
 22. **FOLDERID_AppsFolder 可能 E_FAIL**：SHGetKnownFolderPath({1e87508d-…}) 在受限上下文返回 0x80004005，而 **"shell:AppsFolder" 可以被 SHParseDisplayName 直接解析**——取 AppsFolder 入口要多级回退（known folder → shell:AppsFolder → ::{GUID}）。识别 UWP 应用的规则：AppsFolder 子项解析名含 "!"（AUMID = 包家族名!应用ID），桌面程序没有。
 23. **x64 ABI：≤8 字节的结构体参数按"单个寄存器"整体传值**（第五十一轮实锤）：`IShellItemImageFactory.GetImage(SIZE size, ...)` 的 SIZE 拆成两个 int 声明会占两个寄存器、参数错位，直接 0xC0000005——必须原样声明结构体参数。同族坑：第 21 条的 vtable 漏方法。
 24. **GetImage 的 HBITMAP 直接 FromHbitmap 丢 alpha**：图标会变黑底方块；必须 GetDIBits 拷 32bpp 数据自建 Bitmap，且要处理"全图 alpha=0"的退化情况（统一置 255，否则图标整体透明看不见）。
+25. **PowerShell 的 `$true`/`$TRUE` 是内建常量，不能自建同名变量**（第五十六轮实锤）：写 UIA 测试脚本时 `$TRUE = [Condition]::TrueCondition` 会让 `FindAll` 抛 `MethodArgumentConversionInvalidCastArgument`（变量名大小写不敏感），改用 `$TRUE_COND` 之类的名字。
+26. **控件宽度上限写死会截断文字**（第五十六轮实锤）：项目文字曾固定 `MaxWidth = 图标大小*1.8`（默认 57.6px），同一行里格子再宽文字也在这 57.6px 上省略——"启动redis"完整、"启动oracle"只剩"启"。文字的宽度约束应由**布局格子**决定，不要按图标尺寸推算。
+27. **虚拟桌面坐标是带负数的**（第五十六轮实锤）：副屏在主屏左侧/上方时窗口 X/Y 为负数，"是否记录过位置"必须用哨兵值（-1）判断，写 `>= 0` 会把合法坐标当成未记录；"防超出屏幕"的钳制必须用**目标坐标所在显示器**的工作区，用窗口当前所在屏会把副屏坐标拉回主屏。
+28. **`ProcessStartInfo` 的 `Verb = "runas"` 与输出重定向互斥**（第五十六轮）：提权启动必须 `UseShellExecute = true`，此时不能再设 `RedirectStandardOutput/Error`（运行时报错），成功与否只能靠"事后重读状态校验"。
+29. **等宽网格：格子宽度不能自适应内容**（第五十六轮踩、第五十七轮修正）：① `child.Measure(new Size(inf, inf))` 会让文字不换行，一个超长名字把所有格子撑成整行宽、面板退化成单列——测量宽度必须给约束（格子宽 − 外边距）；② 更根本的错：把格子宽度做成"随内容变化"后，列数/列位置会随"项目数量、文字长短"漂移（用户实测同一分类下两个子分类一个 2 列一个 3 列、项目少的被拉伸平分）。正确模型是**格子宽度 = 由设置算出的固定值，列数 = 窗口宽度 ÷ 格子宽度，末行不拉伸**；测量与排列两阶段必须用同一个列宽/列数。
+30. **netsh 输出编码跟随系统区域设置**（第五十六轮实锤）：中文 Windows 是 GBK 而非 UTF-8，读原始字节后先按 `UTF8Encoding(false, true)` 严格解码、失败回退 `CodePagesEncodingProvider` + `CurrentCulture.TextInfo.ANSICodePage`；`H:` 隐藏网络判定必须匹配"未广播"/"not broadcasting"（普通网络那行也含"广播"二字）。
+31. **给语言 JSON 插/删键必须复验**（第五十六轮）：插键后 `json.load` + 键集合对比 + **反向扫描"代码引用的键是否都有定义"**；本轮据此发现多加了一个没人引用的键。删键时注意别把锚点行的键值拆开（第四十九轮踩过）。
+32. **UIA 测试的中文/emoji 结果要写 UTF-8 文件再读**（第五十六轮）：控制台编码会丢字符（emoji 显示成 `??`），直接看输出会误判"乱码了"——实际数据没问题。另外用 heredoc 写含反斜杠的 C# 代码会被 shell 吞掉转义，改用 Write 工具或 python 写文件。

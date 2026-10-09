@@ -189,60 +189,11 @@ public sealed partial class NoteWindow : Window
     /// <summary>按设置的显示位置定位窗口（支持"上次位置"）</summary>
     private void ComputeShowPosition()
     {
-        var displayArea = Microsoft.UI.Windowing.DisplayArea.GetFromWindowId(
-            Microsoft.UI.Win32Interop.GetWindowIdFromWindow(_hWnd),
-            Microsoft.UI.Windowing.DisplayAreaFallback.Nearest);
-        var wa = displayArea.WorkArea;
-
-        var scale = GetDpiScale();
-        var width = (int)(_settings.NoteWindowWidth * scale);
-        var height = (int)(_settings.NoteWindowHeight * scale);
-
-        int x, y;
-        switch (_settings.NoteShowPosition)
-        {
-            case ShowPosition.TopLeft:
-                x = wa.X; y = wa.Y;
-                break;
-            case ShowPosition.TopRight:
-                x = wa.X + wa.Width - width; y = wa.Y;
-                break;
-            case ShowPosition.BottomLeft:
-                x = wa.X; y = wa.Y + wa.Height - height;
-                break;
-            case ShowPosition.BottomRight:
-                x = wa.X + wa.Width - width; y = wa.Y + wa.Height - height;
-                break;
-            case ShowPosition.LastPosition:
-                if (_settings.NoteLastWindowX >= 0 && _settings.NoteLastWindowY >= 0)
-                {
-                    x = _settings.NoteLastWindowX;
-                    y = _settings.NoteLastWindowY;
-                }
-                else
-                {
-                    x = wa.X + (wa.Width - width) / 2;
-                    y = wa.Y + (wa.Height - height) / 2;
-                }
-                break;
-            case ShowPosition.FollowMouse:
-                Win32Helper.GetCursorPos(out var cursor);
-                x = cursor.X - width / 2;
-                y = cursor.Y - height / 2;
-                break;
-            case ShowPosition.Center:
-            default:
-                x = wa.X + (wa.Width - width) / 2;
-                y = wa.Y + (wa.Height - height) / 2;
-                break;
-        }
-
-        if (x < wa.X) x = wa.X;
-        if (y < wa.Y) y = wa.Y;
-        if (x + width > wa.X + wa.Width) x = wa.X + wa.Width - width;
-        if (y + height > wa.Y + wa.Height) y = wa.Y + wa.Height - height;
-
-        AppWindow.Move(new Windows.Graphics.PointInt32(x, y));
+        // 位置计算统一走 WindowPositionHelper（多显示器/负数坐标/各屏缩放都在那里处理）
+        var point = WindowPositionHelper.Compute(_hWnd, _settings.NoteShowPosition,
+            _settings.NoteWindowWidth, _settings.NoteWindowHeight,
+            _settings.NoteLastWindowX, _settings.NoteLastWindowY);
+        AppWindow.Move(point);
     }
 
     private double GetDpiScale()

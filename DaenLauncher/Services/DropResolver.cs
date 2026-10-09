@@ -199,8 +199,7 @@ public static class DropResolver
             {
                 // Edge/Chrome 等浏览器的桌面快捷方式自带 --single-argument 等内部参数，
                 // 对用户是噪音，过滤掉
-                args = System.Text.RegularExpressions.Regex.Replace(
-                    args, @"--single-argument", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase).Trim();
+                args = StripBrowserNoiseArguments(args);
 
                 return new LauncherItem
                 {
@@ -211,12 +210,39 @@ public static class DropResolver
                 };
             }
 
-            // 其他目标按 lnk 本身处理
+            // 目标是非 exe 的本地文件（.bat/.cmd/.ps1/.msc 等）：
+            // 也要用"目标路径"而不是快捷方式本身，否则复制路径/创建桌面快捷方式/
+            // 打开所在位置全都指向 .lnk（需求-BUG：拖入 .bat 快捷方式后路径是 .lnk）。
+            // 类型沿用"文件"，启动走 ShellExecute（系统会按扩展名关联执行）。
+            if (File.Exists(target))
+            {
+                return new LauncherItem
+                {
+                    Name = System.IO.Path.GetFileNameWithoutExtension(path),
+                    Path = target,
+                    Type = LauncherItemType.File,
+                    Arguments = args
+                };
+            }
+
+            // 其他目标（如 LNK 指向的文件已被删除，或指向 .lnk/.url 的二级快捷方式）：
+            // 目标文件不存在时保留快捷方式本身，保证仍可点击启动
+            if (!Directory.Exists(target))
+            {
+                return new LauncherItem
+                {
+                    Name = System.IO.Path.GetFileNameWithoutExtension(path),
+                    Path = path,
+                    Type = LauncherItemType.Lnk
+                };
+            }
+
+            // 目标是个文件夹
             return new LauncherItem
             {
                 Name = System.IO.Path.GetFileNameWithoutExtension(path),
-                Path = path,
-                Type = LauncherItemType.Lnk
+                Path = target,
+                Type = LauncherItemType.Folder
             };
         }
         catch
@@ -233,5 +259,16 @@ public static class DropResolver
                url.StartsWith("https://", StringComparison.OrdinalIgnoreCase)
             ? LauncherItemType.Url
             : LauncherItemType.Protocol;
+    }
+
+    /// <summary>
+    /// 过滤浏览器快捷方式里的内部参数（对用户是噪音）。
+    /// Edge/Chrome 的桌面快捷方式自带 --single-argument 等，删除后要合并多余空格。
+    /// </summary>
+    private static string StripBrowserNoiseArguments(string arguments)
+    {
+        return System.Text.RegularExpressions.Regex.Replace(
+            arguments, @"--single-argument", "",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase).Trim();
     }
 }

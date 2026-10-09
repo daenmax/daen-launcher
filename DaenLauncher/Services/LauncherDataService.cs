@@ -18,8 +18,10 @@ public sealed class LauncherDataService
         _store = new JsonStore<LauncherData>(Path.Combine(DataPathService.LauncherDir, "launcher.json"));
         Data = _store.Load();
 
-        // 兼容旧数据修正（第五十四轮）：有修改就立即落盘
-        if (NormalizeLegacyUrlTypes())
+        // 兼容旧数据修正（第五十四轮/第五十六轮）：有修改就立即落盘
+        var changed = NormalizeLegacyUrlTypes();
+        changed |= NormalizeLegacyShortcutPaths();
+        if (changed)
         {
             Save();
         }
@@ -49,7 +51,9 @@ public sealed class LauncherDataService
         _store.Reload();
         Data = _store.Load();
 
-        if (NormalizeLegacyUrlTypes())
+        var changed = NormalizeLegacyUrlTypes();
+        changed |= NormalizeLegacyShortcutPaths();
+        if (changed)
         {
             Save();
         }
@@ -95,6 +99,47 @@ public sealed class LauncherDataService
         return changed;
     }
 
+    /// <summary>
+    /// 旧数据修正（第五十六轮）：以前拖入 .bat/.cmd/.ps1 等非 exe 目标的快捷方式时，
+    /// 项目存的是快捷方式自己的路径（如 "xx.bat - 快捷方式.lnk"）而不是真实目标，
+    /// 导致复制路径/创建桌面快捷方式/打开所在位置都指向 .lnk。
+    /// 这里把这类项目重新解析成真实目标；解析不出来就保持原样（仍可点击启动）。
+    /// 返回是否有修改。
+    /// </summary>
+    private bool NormalizeLegacyShortcutPaths()
+    {
+        var changed = false;
+        foreach (var category in Data.Categories)
+        {
+            foreach (var sub in category.SubCategories)
+            {
+                foreach (var item in sub.Items)
+                {
+                    if (item.Type != LauncherItemType.Lnk) continue;
+                    if (string.IsNullOrWhiteSpace(item.Path)) continue;
+
+                    // 仅处理"指向真实存在的 .lnk/.url 文件"的项目
+                    var extension = Path.GetExtension(item.Path).ToLowerInvariant();
+                    if (extension is not (".lnk" or ".url")) continue;
+                    if (!File.Exists(item.Path)) continue;
+
+                    var resolved = DropResolver.ResolveShortcutFile(item.Path);
+                    if (resolved == null) continue;
+
+                    // 解析结果仍指向快捷方式本身则不动（避免无意义的替换）
+                    if (string.Equals(resolved.Path, item.Path, StringComparison.OrdinalIgnoreCase)) continue;
+
+                    item.Path = resolved.Path;
+                    item.Type = resolved.Type;
+                    item.Arguments = resolved.Arguments;
+                    item.IconFile = resolved.IconFile;
+                    changed = true;
+                }
+            }
+        }
+        return changed;
+    }
+
     /// <summary>导出数据的目录列表（数据页勾选项）</summary>
     public static string[] DataFolderNames => new[] { "config", "language", "icon", "launcher", "todo", "note", "clipboard" };
 
@@ -128,5 +173,20 @@ public sealed class LauncherDataService
                 }
             }
         }
+    }
+
+    /// <summary>
+    /// 重新检查某个子分类下所有项目的有效性（需求：右键子分类空白处"刷新项目"）。
+    /// 返回 (检查总数, 失效数量)，供界面提示用。
+    /// </summary>
+    public static (int Total, int Missing) RecheckMissing(LauncherSubCategory sub)
+    {
+        var missing = 0;
+        foreach (var item in sub.Items)
+        {
+            item.IsMissing = IsItemMissing(item);
+            if (item.IsMissing) missing++;
+        }
+        return (sub.Items.Count, missing);
     }
 }

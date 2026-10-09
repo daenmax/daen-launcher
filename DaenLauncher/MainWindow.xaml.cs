@@ -221,67 +221,11 @@ public sealed partial class MainWindow : Window
     /// <summary>计算显示位置（跟随鼠标时以鼠标为中心并防止超出屏幕）</summary>
     private void ComputeShowPosition(AppSettings settings)
     {
-        var displayArea = Microsoft.UI.Windowing.DisplayArea.GetFromWindowId(
-            Microsoft.UI.Win32Interop.GetWindowIdFromWindow(_hWnd),
-            Microsoft.UI.Windowing.DisplayAreaFallback.Nearest);
-        var wa = displayArea.WorkArea;
-
-        // 尺寸：物理像素换算（AppWindow 用物理像素，设置里存逻辑像素）
-        var scale = GetDpiScale();
-        var width = (int)(settings.WindowWidth * scale);
-        var height = (int)(settings.WindowHeight * scale);
-
-        int x, y;
-        switch (settings.ShowPosition)
-        {
-            case ShowPosition.Center:
-                x = wa.X + (wa.Width - width) / 2;
-                y = wa.Y + (wa.Height - height) / 2;
-                break;
-            case ShowPosition.LastPosition:
-                // 上次位置：用记录的坐标（物理像素）；没记录过则退回居中
-                if (settings.LastWindowX >= 0 && settings.LastWindowY >= 0)
-                {
-                    x = settings.LastWindowX;
-                    y = settings.LastWindowY;
-                    // 防止上次的位置超出当前屏幕（如换了分辨率/接了外接屏）
-                    if (x < wa.X) x = wa.X;
-                    if (y < wa.Y) y = wa.Y;
-                    if (x + width > wa.X + wa.Width) x = wa.X + wa.Width - width;
-                    if (y + height > wa.Y + wa.Height) y = wa.Y + wa.Height - height;
-                }
-                else
-                {
-                    x = wa.X + (wa.Width - width) / 2;
-                    y = wa.Y + (wa.Height - height) / 2;
-                }
-                break;
-            case ShowPosition.TopLeft:
-                x = wa.X; y = wa.Y;
-                break;
-            case ShowPosition.TopRight:
-                x = wa.X + wa.Width - width; y = wa.Y;
-                break;
-            case ShowPosition.BottomLeft:
-                x = wa.X; y = wa.Y + wa.Height - height;
-                break;
-            case ShowPosition.BottomRight:
-                x = wa.X + wa.Width - width; y = wa.Y + wa.Height - height;
-                break;
-            case ShowPosition.FollowMouse:
-            default:
-                Win32Helper.GetCursorPos(out var cursor);
-                x = cursor.X - width / 2;
-                y = cursor.Y - height / 2;
-                // 防止超出屏幕边缘
-                if (x < wa.X) x = wa.X;
-                if (y < wa.Y) y = wa.Y;
-                if (x + width > wa.X + wa.Width) x = wa.X + wa.Width - width;
-                if (y + height > wa.Y + wa.Height) y = wa.Y + wa.Height - height;
-                break;
-        }
-
-        _appWindow.Move(new PointInt32(x, y));
+        // 位置计算统一走 WindowPositionHelper（多显示器/负数坐标/各屏缩放都在那里处理）
+        var point = WindowPositionHelper.Compute(_hWnd, settings.ShowPosition,
+            settings.WindowWidth, settings.WindowHeight,
+            settings.LastWindowX, settings.LastWindowY);
+        _appWindow.Move(point);
     }
 
     private double GetDpiScale()
@@ -963,15 +907,8 @@ public sealed partial class MainWindow : Window
         if (!_itemsPanelBySub.TryGetValue(targetSub.Id, out var panel))
         {
             panelIsNew = true;
-            if (settings.ItemLayout == ItemLayoutMode.Grid)
-            {
-                panel = new UniformWrapPanel();
-            }
-            else
-            {
-                // 列表：固定 1 列，每行铺满面板宽度（与 BuildItemsHost 一致）
-                panel = new UniformWrapPanel { FixedColumns = 1 };
-            }
+            // 与 BuildItemsHost 用同一个工厂：格子宽度/列数规则保持一致（需求）
+            panel = CreateItemsPanel(settings);
             _itemsPanelBySub[targetSub.Id] = panel;
         }
 
@@ -1278,25 +1215,28 @@ public sealed partial class MainWindow : Window
         return header;
     }
 
+    /// <summary>
+    /// 创建项目容器面板。
+    /// 平铺模式：格子宽度固定（由图标大小/文字大小/横向间距设置算出）——
+    /// 一行几列只取决于"窗口宽度 ÷ 格子宽度"，与项目数量、文字长短无关，
+    /// 所有子分类列数一致、列位置对齐（需求）。
+    /// 列表模式：固定 1 列，每行铺满面板宽度（悬停高亮满行）。
+    /// </summary>
+    private static UniformWrapPanel CreateItemsPanel(AppSettings settings)
+    {
+        if (settings.ItemLayout == ItemLayoutMode.List)
+        {
+            return new UniformWrapPanel { FixedColumns = 1 };
+        }
+        return new UniformWrapPanel { CellWidth = settings.ComputeItemCellWidth() };
+    }
+
     /// <summary>构建某个子分类的项目容器（平铺/列表 + 拖动排序）。
     /// 注意：文件拖放统一在 PanelHost 上处理（整块面板区域都可作为拖放目标）。</summary>
     private Panel BuildItemsHost(LauncherSubCategory sub)
     {
         var settings = SettingsService.Instance.Settings;
-
-        Panel itemsPanel;
-        if (settings.ItemLayout == ItemLayoutMode.Grid)
-        {
-            // 平铺：等宽换行面板——每行数量只由窗口宽度决定，列对齐、格子等宽（需求-BUG1）
-            itemsPanel = new UniformWrapPanel();
-        }
-        else
-        {
-            // 列表：等宽面板固定 1 列——每行按钮必然铺满面板宽度（悬停高亮铺满整行），
-            // 行高统一、图标列对齐，不受文字宽度影响（需求-BUG2/优化3）。
-            // 间距由项目自身 Margin 控制（跟随设置）
-            itemsPanel = new UniformWrapPanel { FixedColumns = 1 };
-        }
+        var itemsPanel = CreateItemsPanel(settings);
 
         foreach (var item in sub.Items)
         {
@@ -1680,7 +1620,13 @@ public sealed partial class MainWindow : Window
         return builder.ToString();
     }
 
-    /// <summary>文字块（文字大小可为 0 = 不显示；列表模式不限制宽度换行）</summary>
+    /// <summary>
+    /// 文字块（文字大小可为 0 = 不显示）。
+    /// 不限制文字宽度：等宽格子由 UniformWrapPanel 统一决定（格子宽 = 该面板里最宽项目的自然宽度），
+    /// 文字在格子内换行/超出才省略。
+    /// 曾经写死 MaxWidth = 图标大小*1.8 是 BUG——一行里格子明明很宽，
+    /// 长名字仍被压在几十像素内裁成"启…"（同一面板里 "启动redis" 却完整显示，需求-修复）。
+    /// </summary>
     private FrameworkElement? BuildItemText(LauncherItem item, AppSettings settings, bool isListMode,
         HorizontalAlignment blockAlignment)
     {
@@ -1693,7 +1639,6 @@ public sealed partial class MainWindow : Window
             TextAlignment = isListMode ? TextAlignment.Left : TextAlignment.Center,
             MaxLines = Math.Max(1, settings.ItemTextMaxLines),
             TextTrimming = TextTrimming.CharacterEllipsis,
-            MaxWidth = isListMode ? double.PositiveInfinity : Math.Max(50, settings.ItemIconSize * 1.8),
             VerticalAlignment = VerticalAlignment.Center,
             HorizontalAlignment = blockAlignment
         };
@@ -1923,7 +1868,56 @@ public sealed partial class MainWindow : Window
         AddEntry(loc.T("Main.Item.Add.Protocol"), () => AddItemByTextDialogAsync(targetSub, LauncherItemType.Protocol));
 
         menu.Items.Add(addSub);
+        menu.Items.Add(new MenuFlyoutSeparator());
+
+        // 刷新项目（需求）：重新检测本子分类下所有项目是否还存在、是否正常，
+        // 并重新提取图标——正常情况下可修复换了文件后残留的旧图标，
+        // 失效的则换成"项目无法找到"图标（以前只有重启软件才会检测）
+        var refreshItem = new MenuFlyoutItem { Text = loc.T("Main.Item.RefreshItems") };
+        refreshItem.Click += (_, _) => _ = RefreshSubCategoryItemsAsync(targetSub);
+        menu.Items.Add(refreshItem);
+
         menu.ShowAt(PanelHost, e.GetPosition(PanelHost));
+    }
+
+    /// <summary>
+    /// 刷新某个子分类下的全部项目（需求：右键面板空白处"刷新项目"）。
+    /// 做两件事：① 重新判定每个项目是否存在/正常（失效的标记为 IsMissing）；
+    /// ② 清掉图标缓存并重建面板，让图标按最新状态重新提取
+    /// （正常的取真实图标，失效的显示"项目无法找到"）。
+    /// </summary>
+    private async Task RefreshSubCategoryItemsAsync(LauncherSubCategory sub)
+    {
+        if (sub.Items.Count == 0)
+        {
+            await ShowMessageDialog(
+                LocalizationService.Tr("Main.Item.RefreshItems.Empty"),
+                LocalizationService.Tr("Main.Item.RefreshItems"));
+            return;
+        }
+
+        // ① 重新检测存在性（路径判定是纯 IO，放后台避免项目多时卡界面）
+        var (total, missing) = await Task.Run(() => LauncherDataService.RecheckMissing(sub));
+
+        // ② 清图标缓存：让下一步重建面板时按类型重新提取。
+        //    失效项目不会去提取（加载图标逻辑看到 IsMissing 直接给"项目无法找到"），
+        //    网址类还要清会话内的 favicon 失败记录，否则本次会话永远不会重新联网
+        foreach (var item in sub.Items)
+        {
+            ItemIconService.DeleteCache(item);
+            ItemIconService.ClearFailedFavicon(item.Path);
+        }
+
+        // 重建面板让新图标立即生效
+        RefreshPanelOnly();
+
+        // 有失效项目才提示，全部正常时静默（避免每次刷新都弹窗）
+        if (missing > 0)
+        {
+            await ShowMessageDialog(
+                string.Format(LocalizationService.Tr("Main.Item.RefreshItems.FoundMissing"), total, missing),
+                LocalizationService.Tr("Main.Item.RefreshItems"));
+        }
     }
 
     /// <summary>用指针位置实时命中面板上的子分类（卡片/Tab 头），没命中返回 null</summary>
@@ -1939,7 +1933,7 @@ public sealed partial class MainWindow : Window
     }
 
     /// <summary>通过文件选择器添加项目（可执行程序/快捷方式/文件）。
-    /// 快捷方式会解析出真实目标（exe/网址/协议/UWP），与拖拽 .lnk 进来的行为一致。</summary>
+    /// 快捷方式会解析出真实目标（exe/文件/网址/协议/UWP），与拖拽 .lnk 进来的行为一致。</summary>
     private async Task AddItemByFilePickerAsync(LauncherSubCategory targetSub, string extension,
         LauncherItemType fallbackType)
     {
@@ -1953,26 +1947,30 @@ public sealed partial class MainWindow : Window
             var file = await picker.PickSingleFileAsync();
             if (file == null) return;
 
-            LauncherItem newItem;
-            if (fallbackType == LauncherItemType.Lnk)
+            // 快捷方式一律解析出真实目标——不管用户走的是"快捷方式"还是"文件"菜单项，
+            // 否则"文件"菜单选中的 .lnk 会原样存下 .lnk 路径（需求-BUG 同源问题）
+            var pickedExtension = System.IO.Path.GetExtension(file.Path).ToLowerInvariant();
+            if (fallbackType == LauncherItemType.Lnk ||
+                pickedExtension is ".lnk" or ".url")
             {
-                newItem = DropResolver.ResolveShortcutFile(file.Path) ?? new LauncherItem
+                var resolved = DropResolver.ResolveShortcutFile(file.Path);
+                AddLauncherItem(targetSub, resolved ?? new LauncherItem
                 {
                     Name = System.IO.Path.GetFileNameWithoutExtension(file.Name),
                     Path = file.Path,
                     Type = LauncherItemType.Lnk
-                };
+                });
+                return;
             }
-            else
+
+            // .exe 也走"可执行程序"类型（即使从"文件"菜单选中）
+            var type = pickedExtension == ".exe" ? LauncherItemType.Exe : fallbackType;
+            AddLauncherItem(targetSub, new LauncherItem
             {
-                newItem = new LauncherItem
-                {
-                    Name = System.IO.Path.GetFileNameWithoutExtension(file.Name),
-                    Path = file.Path,
-                    Type = fallbackType
-                };
-            }
-            AddLauncherItem(targetSub, newItem);
+                Name = System.IO.Path.GetFileNameWithoutExtension(file.Name),
+                Path = file.Path,
+                Type = type
+            });
         }
         catch (Exception ex)
         {

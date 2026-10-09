@@ -79,9 +79,45 @@ public static class Win32Helper
     [DllImport("user32.dll")]
     public static extern uint GetDpiForWindow(IntPtr hwnd);
 
+    [DllImport("user32.dll")]
+    private static extern IntPtr MonitorFromPoint(POINT pt, uint dwFlags);
+
+    [DllImport("shcore.dll")]
+    private static extern int GetDpiForMonitor(IntPtr hmonitor, int dpiType, out uint dpiX, out uint dpiY);
+
     /// <summary>剪贴板序列号：剪贴板内容每次变化都 +1（剪贴板监听轮询用）</summary>
     [DllImport("user32.dll")]
     public static extern uint GetClipboardSequenceNumber();
+
+    /// <summary>MONITOR_DEFAULTTONEAREST：坐标不在任何显示器上时返回最近的显示器</summary>
+    private const uint MonitorDefaultToNearest = 2;
+
+    /// <summary>MDT_EFFECTIVE_DPI：获取显示器"有效 DPI"（受缩放设置影响，与窗口 DPI 一致）</summary>
+    private const int MdtEffectiveDpi = 0;
+
+    /// <summary>
+    /// 取指定屏幕坐标所在显示器的 DPI 缩放系数（1.0 = 100%）。
+    /// 多显示器且各屏缩放不同时，必须按"目标点所在的显示器"取 DPI——
+    /// 用窗口当前 DPI（GetDpiForWindow）在把窗口移动到另一块屏时会算错尺寸。
+    /// 获取失败返回 1.0。
+    /// </summary>
+    public static double GetDpiScaleForPoint(int x, int y)
+    {
+        try
+        {
+            var monitor = MonitorFromPoint(new POINT { X = x, Y = y }, MonitorDefaultToNearest);
+            if (monitor == IntPtr.Zero) return 1.0;
+
+            var hr = GetDpiForMonitor(monitor, MdtEffectiveDpi, out var dpiX, out _);
+            // S_OK(0) 或 S_FALSE(1，表示当前系统不支持按显示器 DPI，返回系统 DPI) 都可用
+            if (hr != 0 && hr != 1) return 1.0;
+            return dpiX <= 0 ? 1.0 : dpiX / 96.0;
+        }
+        catch
+        {
+            return 1.0;
+        }
+    }
 
     #endregion
 
