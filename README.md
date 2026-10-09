@@ -113,6 +113,9 @@ dotnet publish DaenLauncher/DaenLauncher.csproj -c Release -r win-x64
 | 国际化 | 内嵌 zh-CN / en-US 语言包，支持自定义语言文件 |
 | 单实例 | 命名互斥体 + 事件激活 |
 
+## 其他使用教程
+- [其他教程](./其他教程.md)
+
 ## 反馈与交流
 
 - GitHub Issues：[github.com/daenmax/daen-launcher/issues](https://github.com/daenmax/daen-launcher/issues)
