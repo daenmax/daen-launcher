@@ -128,7 +128,8 @@ public sealed partial class MainWindow : Window
 
         // ===== 窗口大小与位置 =====
         var settings = SettingsService.Instance.Settings;
-        _appWindow.Resize(new SizeInt32((int)settings.WindowWidth, (int)settings.WindowHeight));
+        // 保存的是"客户区逻辑尺寸"，Resize 需要补边框差 + DPI 换算（直接传会每次重启缩小一个边框宽）
+        WindowPositionHelper.ApplyClientSize(_appWindow, _hWnd, settings.WindowWidth, settings.WindowHeight);
         LeftColumn.Width = new GridLength(settings.LeftPaneWidth);
         ApplyLockSize(settings.LockSize);
         ApplyAlwaysOnTop(settings.AlwaysOnTop);
@@ -146,6 +147,19 @@ public sealed partial class MainWindow : Window
             Interval = TimeSpan.FromMilliseconds(500)
         };
         _savePositionTimer.Tick += SavePositionTimer_Tick;
+
+        // Ctrl+F 搜索弹层（窗口有焦点时才触发，符合"启动器是焦点时按下 Ctrl+F"的需求）
+        var searchAccelerator = new KeyboardAccelerator
+        {
+            Modifiers = Windows.System.VirtualKeyModifiers.Control,
+            Key = Windows.System.VirtualKey.F
+        };
+        searchAccelerator.Invoked += (_, args) =>
+        {
+            ToggleSearchPopup();
+            args.Handled = true;
+        };
+        RootGrid.KeyboardAccelerators.Add(searchAccelerator);
 
         // ===== 初始化界面 =====
         _ = LoadTitleBarIconAsync();
@@ -255,9 +269,10 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    /// <summary>隐藏窗口（不退出进程）。隐藏前把当前位置落盘（"上次位置"用）</summary>
+    /// <summary>隐藏窗口（不退出进程）。隐藏前把当前位置落盘（"上次位置"用），并关闭搜索弹层</summary>
     public void HideWindow()
     {
+        HideSearchPopup();
         SaveWindowPositionNow();
         _appWindow.Hide();
     }

@@ -77,9 +77,10 @@ public sealed partial class SettingsWindow : Window
         LocalizationService.LanguageChanged += ApplyLocalization;
 
         // 窗口尺寸（记住上次大小，需求-优化1）
+        // 保存的是"客户区逻辑尺寸"，Resize 需要补边框差 + DPI 换算（直接传会每次重启缩小一个边框宽）
         var settings = SettingsService.Instance.Settings;
-        _appWindow.Resize(new Windows.Graphics.SizeInt32(
-            (int)settings.SettingsWindowWidth, (int)settings.SettingsWindowHeight));
+        WindowPositionHelper.ApplyClientSize(_appWindow, _hWnd,
+            settings.SettingsWindowWidth, settings.SettingsWindowHeight);
 
         SizeChanged += (_, args) =>
         {

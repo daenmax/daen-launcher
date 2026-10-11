@@ -21,7 +21,7 @@
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
     <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
     <DefaultLanguage>zh-CN</DefaultLanguage>
-    <Version>1.6.3</Version>
+    <Version>1.6.5</Version>
   </PropertyGroup>
 
   <ItemGroup>
@@ -33,6 +33,8 @@
     <PackageReference Include="BouncyCastle.Cryptography" Version="2.5.1" />
     <!-- QRCoder：二维码生成（WiFi 密码查看 / 二维码生成工具） -->
     <PackageReference Include="QRCoder" Version="1.6.0" />
+    <!-- TinyPinyin.Net：汉字转拼音（Ctrl+F 搜索项目支持拼音首字母） -->
+    <PackageReference Include="TinyPinyin.Net" Version="1.0.2" />
   </ItemGroup>
 
   <ItemGroup>

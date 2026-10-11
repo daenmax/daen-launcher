@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using DaenLauncher.Services;
@@ -41,6 +42,19 @@ internal sealed class JsonTool : IToolPage
 
     private enum JsonOp { Format, Compress, Escape, Unescape }
 
+    /// <summary>
+    /// JSON 序列化选项（格式化和压缩共用）：
+    /// WriteIndented = 缩进美化；
+    /// Encoder 用 UnsafeRelaxedJsonEscaping——.NET 默认编码器会把中文等非 ASCII 字符
+    /// 转成 \uXXXX（用户反馈的问题），这个编码器原样输出中文，只转义 JSON 必须转义的字符。
+    /// （"Unsafe" 指的是结果直接嵌 HTML 时需要另行处理，纯格式化工具场景没有这个问题。）
+    /// </summary>
+    private static readonly JsonSerializerOptions JsonSerializeOptions = new()
+    {
+        WriteIndented = true,
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+    };
+
     private void Run(JsonOp op)
     {
         try
@@ -52,7 +66,7 @@ internal sealed class JsonTool : IToolPage
                     var node = JsonNode.Parse(StripJsonComments(_input.Text));
                     ToolKit.SetOutput(_output, node == null
                         ? LocalizationService.Tr("Tools.Json.ErrEmpty")
-                        : JsonSerializer.Serialize(node, new JsonSerializerOptions { WriteIndented = true }));
+                        : JsonSerializer.Serialize(node, JsonSerializeOptions));
                     break;
                 }
                 case JsonOp.Compress:
@@ -60,7 +74,11 @@ internal sealed class JsonTool : IToolPage
                     var node = JsonNode.Parse(StripJsonComments(_input.Text));
                     ToolKit.SetOutput(_output, node == null
                         ? LocalizationService.Tr("Tools.Json.ErrEmpty")
-                        : JsonSerializer.Serialize(node));
+                        // 压缩 = 不缩进；编码器同样用宽松的，保证中文原样输出
+                        : JsonSerializer.Serialize(node, new JsonSerializerOptions
+                        {
+                            Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+                        }));
                     break;
                 }
                 case JsonOp.Escape:

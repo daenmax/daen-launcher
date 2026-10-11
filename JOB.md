@@ -754,6 +754,23 @@ build.bat / clean.bat   双击可用的编译/清理脚本
 - 无新增语言键（仍 **693 键两边对齐**）。
 - 版本号 1.6.0 → **1.6.1**；Debug/Release 均 0 错误 0 警告；Release 单文件 exe 已复制 `build\DaenLauncher.exe`（FileVersion 1.6.1.0）。
 
+## 最新变更（2026-10-11 第六十一轮：4 需求——工具框固定高度 / JSON 保留中文 / 窗口尺寸恢复差 16px / Ctrl+F 搜索）
+
+- **需求1 常用工具输入/输出框固定高度**：根因——工具页根容器是纵向 StackPanel（高度不受约束），多行 TextBox 只设 MinHeight 时 DesiredSize = 全部文字高度，**内容越多框越长**，把按钮和结果区挤下去。修复：`ToolKit.InputArea/OutputArea` 同时设 `Height = minHeight`（内容超长靠内部滚动条），所有 24 个工具共用这两个工厂方法，一处修复全局生效。
+- **需求2 JSON 格式化中文变 \uXXXX**：根因——`JsonSerializer.Serialize` 默认编码器 `JavaScriptEncoder.Default` 会转义所有非 ASCII 字符。修复：`JsonTool` 的格式化/压缩两处改用 `JavaScriptEncoder.UnsafeRelaxedJsonEscaping`（原样输出中文，只转义 JSON 必需字符；"Unsafe" 仅指嵌 HTML 场景需另行处理，格式化工具无此问题）。控制台实测中文原样输出。
+- **需求3 窗口宽度 991 → 重启变 975**：根因——主窗口/设置窗口/随手记窗口**保存**的是 `Window.SizeChanged` 的 **XAML 客户区逻辑尺寸**，**恢复**却直接把该值传给 `AppWindow.Resize`（设置的是**含边框外框**的物理尺寸），两者差一个窗口边框（100% 缩放下宽 16px/高 8px），每次启动缩小一圈再被 SizeChanged 重新保存。修复：`WindowPositionHelper.ApplyClientSize(appWindow, hWnd, w, h)`——Win32 `GetWindowRect − GetClientRect` 实测边框差 + `GetDpiForWindow` 换算，三窗口接入。**检查结论**：常用工具/剪贴板/壁纸窗口保存和恢复都用 `AppWindow.Size`（外框）本来就自洽无此问题；待办窗口固定尺寸无记忆也不受影响。
+- **需求4 Ctrl+F 项目搜索**：
+  - 新 partial 文件 `MainWindowSearch.cs` + `MainWindow.xaml` 新增 `SearchOverlay` 覆盖层（半透明遮罩 + 顶部居中面板：输入框 + 结果列表 + 快捷键提示行）；
+  - 触发：`KeyboardAccelerator(Ctrl+F)` 挂在 `RootGrid.KeyboardAccelerators` 上（**Window 没有 KeyboardAccelerators 集合，必须挂 UIElement**；窗口有焦点时才触发，符合需求）；
+  - 匹配：TinyPinyin.Net 1.0.2（NuGet 新增）——项目名包含 / 全拼包含 / 拼音首字母包含（均小写；`jsb`→记事本、`wyyyl`→网易云音乐；emoji/符号跳过，字母数字保留）。索引在每次打开弹层时全量重建（项目数据始终最新），多音字取常用读音（库的通用行为）；
+  - 结果行：图标 + 名称 + "分类 › 子分类"，**图标复用面板同款 `LoadItemIconAsync`**（提取/缓存/失效图标完全一致），Tooltip 用 `BuildItemTooltip`；最多显示 50 条；
+  - 交互：输入即筛选（默认选中第一条）、↑↓ 选择、回车启动选中项、Esc 关闭、点击结果启动、点遮罩关闭；启动走 `LaunchItem`（"启动后隐藏"等行为照常生效）；主窗口隐藏时同步关闭弹层保证下次干净打开；
+  - 语言：zh/en 各 +3 键（Main.Search.Placeholder/.NoResults/.Hint，700 键两边对齐 0 缺失）。
+- **新编译坑**：`VirtualKeyModifiers` 在 `Windows.System` 命名空间（不是 Microsoft.UI.Xaml.Input），裸写会 CS0103 连锁引发 XAML WMC9999。
+- **版本**：1.6.3 → **1.6.5**；README 功能特性新增"快速搜索（Ctrl+F）"条目。
+- **测试**：Debug 0 错误；拼音匹配/JSON 中文均用独立控制台程序实测通过。窗口尺寸恢复、搜索弹窗 UI 交互、工具框高度由用户实测。
+
+
 ## 当前进度
 - ✅ 需求1.md 主体 + 十八轮改进/修复全部完成；**"资源管理器菜单"需求已在第十九轮彻底移除（用户决定放弃）**。
 - ✅ 第二十轮：待办功能完成（窗口 + 本地存储 + webnote 云同步 + 设置页）。
@@ -787,6 +804,7 @@ build.bat / clean.bat   双击可用的编译/清理脚本
 - ✅ 第五十八轮：平铺格子宽度加设置页滑条（`ItemCellTextChars` 改为可配置属性，范围 1~30 默认 9，随时拖动即时生效 + 恢复默认）。版本 1.6.2。
 - ✅ 第五十九轮：默认格子宽度 9→6（已有配置不受影响）+ 面板右键「刷新项目」（重新检测存在性 + 重提图标，失效换「项目无法找到」、恢复则换回正常图标，仅失效时提示）。版本 1.6.3。
 - ✅ 第六十轮：`其他教程.md` 排版整理（加简介 + 目录、统一分步结构）+ 新增「自定义图标分组（group_ 开头文件夹）」教程。纯文档。
+- ✅ 第六十一轮：4 需求——常用工具输入/输出框固定高度、JSON 格式化保留中文（不转 \uXXXX）、主窗口/设置/随手记窗口尺寸恢复差 16px 修复（ApplyClientSize 统一补边框差+DPI）、**Ctrl+F 项目搜索弹窗**（图标列表 + 全拼/拼音首字母匹配，TinyPinyin.Net）。版本 1.6.5。
 
 ## 最新变更（2026-10-09 第六十轮：`其他教程.md` 排版整理 + 新增「自定义图标分组」教程）
 

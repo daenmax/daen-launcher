@@ -99,5 +99,38 @@
                   AllowDrop="True" DragOver="PanelHost_DragOver" Drop="PanelHost_Drop"
                   RightTapped="PanelHost_RightTapped" />
         </Grid>
+
+        <!-- ===== Ctrl+F 项目搜索弹层（覆盖全窗口，默认隐藏，逻辑在 MainWindowSearch.cs） ===== -->
+        <Grid x:Name="SearchOverlay" Grid.Row="0" Grid.RowSpan="2" Visibility="Collapsed">
+            <!-- 半透明遮罩：点空白处关闭搜索 -->
+            <Border x:Name="SearchBackdrop" Background="#66000000"
+                    PointerPressed="SearchBackdrop_PointerPressed" />
+            <!-- 顶部居中搜索面板：输入框 + 结果列表（命令面板风格）。
+                 不写死 Width：窄窗口时跟随窗口收缩（留 56 边距），宽窗口时上限 560 -->
+            <Border x:Name="SearchPanel" HorizontalAlignment="Center" VerticalAlignment="Top"
+                    Margin="56,56,56,0" MaxWidth="560"
+                    CornerRadius="8" BorderThickness="1"
+                    Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
+                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                    Padding="12">
+                <StackPanel Spacing="8">
+                    <TextBox x:Name="SearchBox" IsSpellCheckEnabled="False"
+                             KeyDown="SearchBox_KeyDown" TextChanged="SearchBox_TextChanged" />
+                    <ListView x:Name="SearchResultsList" MaxHeight="400"
+                              SelectionMode="Single" IsItemClickEnabled="True"
+                              ItemClick="SearchResults_ItemClick">
+                        <ListView.ItemContainerStyle>
+                            <Style TargetType="ListViewItem">
+                                <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                <Setter Property="Padding" Value="0" />
+                                <Setter Property="MinHeight" Value="0" />
+                            </Style>
+                        </ListView.ItemContainerStyle>
+                    </ListView>
+                    <TextBlock x:Name="SearchHintText" FontSize="11" Opacity="0.6" TextWrapping="NoWrap"
+                               TextTrimming="CharacterEllipsis" />
+                </StackPanel>
+            </Border>
+        </Grid>
     </Grid>
 </Window>

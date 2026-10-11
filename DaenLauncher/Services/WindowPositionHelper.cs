@@ -114,4 +114,45 @@ public static class WindowPositionHelper
             return 1.0;
         }
     }
+
+    /// <summary>
+    /// 按记忆的"窗口客户区逻辑尺寸"恢复窗口大小（主窗口/设置窗口/随手记窗口共用）。
+    ///
+    /// 为什么要在这里换算（用户实测：手动调宽 991 → 重启变 975）：
+    /// - Window.SizeChanged 保存的是 **XAML 客户区** 的逻辑像素尺寸；
+    /// - AppWindow.Resize 设置的是 **含边框的外框** 的物理像素尺寸；
+    /// - 两者相差一个窗口边框（100% 缩放下宽 16px、高 8px），把保存值直接传给 Resize，
+    ///   每次重启窗口都会缩小一个边框差。这里补上边框差并换算 DPI，保存什么尺寸就恢复什么尺寸。
+    /// </summary>
+    public static void ApplyClientSize(AppWindow appWindow, IntPtr windowHandle,
+        double logicalWidth, double logicalHeight)
+    {
+        var scale = GetWindowDpiScale(windowHandle);
+
+        // 边框差 = 外框尺寸 − 客户区尺寸（按当前窗口实测，不同主题/缩放下值不同）
+        var frameDx = 0;
+        var frameDy = 0;
+        try
+        {
+            var okOuter = Win32Helper.GetWindowRect(windowHandle, out var outer);
+            var okClient = Win32Helper.GetClientRect(windowHandle, out var client);
+            if (okOuter && okClient)
+            {
+                frameDx = outer.Right - outer.Left - (client.Right - client.Left);
+                frameDy = outer.Bottom - outer.Top - (client.Bottom - client.Top);
+            }
+        }
+        catch
+        {
+            // 量不出边框差就按 0 处理（退化为旧行为，比给一个离谱值安全）
+        }
+
+        // 边框差是物理像素，正常恒 ≥ 0；防御负值（量测异常时按 0）
+        if (frameDx < 0) frameDx = 0;
+        if (frameDy < 0) frameDy = 0;
+
+        var width = (int)Math.Round(logicalWidth * scale) + frameDx;
+        var height = (int)Math.Round(logicalHeight * scale) + frameDy;
+        appWindow.Resize(new SizeInt32(Math.Max(1, width), Math.Max(1, height)));
+    }
 }

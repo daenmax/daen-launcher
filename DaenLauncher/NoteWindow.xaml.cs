@@ -117,9 +117,9 @@ public sealed partial class NoteWindow : Window
         ThemeService.ApplyCaptionButtonColors(appWindow, RootGrid);
 
         // 窗口尺寸（记住上次大小）+ 左栏宽度
-        appWindow.Resize(new Windows.Graphics.SizeInt32(
-            (int)(_settings.NoteWindowWidth * GetDpiScale()),
-            (int)(_settings.NoteWindowHeight * GetDpiScale())));
+        // 保存的是"客户区逻辑尺寸"，Resize 需要补边框差 + DPI 换算（直接传会每次重启缩小一个边框宽）
+        WindowPositionHelper.ApplyClientSize(appWindow, _hWnd,
+            _settings.NoteWindowWidth, _settings.NoteWindowHeight);
         LeftColumn.Width = new GridLength(_settings.NoteLeftPaneWidth);
 
         ApplyBehaviorSettings();

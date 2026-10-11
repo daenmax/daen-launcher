@@ -170,12 +170,18 @@ internal static class ToolKit
     [System.Runtime.InteropServices.DllImport("user32.dll")]
     private static extern IntPtr SetCursor(IntPtr hCursor);
 
-    /// <summary>多行文本输入框（工具的"输入"区）</summary>
+    /// <summary>
+    /// 多行文本输入框（工具的"输入"区）。
+    /// 高度固定：工具页面是纵向 StackPanel（高度不受约束），多行 TextBox 若只设 MinHeight
+    /// 会随内容自动长高（ DesiredSize = 全部文字的高度），把下面的按钮挤走。
+    /// 必须同时写死 Height，内容超长时靠内部滚动条查看。
+    /// </summary>
     public static TextBox InputArea(double minHeight = 110, string placeholderKey = "")
     {
         var box = new TextBox
         {
             MinHeight = minHeight,
+            Height = minHeight,
             TextWrapping = TextWrapping.Wrap,
             IsSpellCheckEnabled = false,
             PlaceholderText = placeholderKey.Length == 0 ? "" : LocalizationService.Tr(placeholderKey)
@@ -185,12 +191,13 @@ internal static class ToolKit
         return box;
     }
 
-    /// <summary>多行文本输出框（只读，工具的"结果"区）</summary>
+    /// <summary>多行文本输出框（只读，工具的"结果"区，高度固定，超长内容内部滚动）</summary>
     public static TextBox OutputArea(double minHeight = 110)
     {
         var box = new TextBox
         {
             MinHeight = minHeight,
+            Height = minHeight,
             TextWrapping = TextWrapping.Wrap,
             IsReadOnly = true,
             IsSpellCheckEnabled = false
