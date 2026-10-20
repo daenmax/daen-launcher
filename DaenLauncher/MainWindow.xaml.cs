@@ -148,18 +148,15 @@ public sealed partial class MainWindow : Window
         };
         _savePositionTimer.Tick += SavePositionTimer_Tick;
 
-        // Ctrl+F 搜索弹层（窗口有焦点时才触发，符合"启动器是焦点时按下 Ctrl+F"的需求）
-        var searchAccelerator = new KeyboardAccelerator
-        {
-            Modifiers = Windows.System.VirtualKeyModifiers.Control,
-            Key = Windows.System.VirtualKey.F
-        };
-        searchAccelerator.Invoked += (_, args) =>
-        {
-            ToggleSearchPopup();
-            args.Handled = true;
-        };
-        RootGrid.KeyboardAccelerators.Add(searchAccelerator);
+        // 窗口级按键（窗口有焦点时才触发）：
+        // - Ctrl+F 打开/关闭项目搜索弹层；
+        // - Esc 隐藏窗口。
+        // 这里用 PreviewKeyDown 而不是 KeyboardAccelerator：KeyboardAccelerator 会给挂载元素
+        // （RootGrid）自动生成一个"Ctrl+F"提示，而提示会被所有子元素继承，
+        // 导致鼠标停在窗口任何位置（按钮/分类/空白）都弹这个提示。
+        // PreviewKeyDown 是隧道事件，即使焦点控件（如输入框）处理了按键也能先收到。
+        RootGrid.AddHandler(UIElement.PreviewKeyDownEvent,
+            new KeyEventHandler(RootGrid_PreviewKeyDown), handledEventsToo: true);
 
         // ===== 初始化界面 =====
         _ = LoadTitleBarIconAsync();
@@ -176,6 +173,45 @@ public sealed partial class MainWindow : Window
     }
 
     #region 窗口行为
+
+    /// <summary>
+    /// 窗口级按键处理（构造函数里挂到 RootGrid 的 PreviewKeyDown）：
+    /// Ctrl+F 打开/关闭搜索弹层；Esc 隐藏窗口。
+    /// </summary>
+    private void RootGrid_PreviewKeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        switch (e.Key)
+        {
+            case Windows.System.VirtualKey.F when IsControlDown():
+                ToggleSearchPopup();
+                e.Handled = true;
+                break;
+
+            case Windows.System.VirtualKey.Escape:
+                // 有弹出层（菜单/下拉框/对话框）时让弹出层自己处理 Esc
+                if (WindowKeyHelper.IsPopupOpen(RootGrid)) break;
+
+                // 搜索弹层打开时，Esc 只关闭弹层，不隐藏整个窗口
+                if (SearchOverlay.Visibility == Visibility.Visible)
+                {
+                    HideSearchPopup();
+                }
+                else
+                {
+                    HideWindow();
+                }
+                e.Handled = true;
+                break;
+        }
+    }
+
+    /// <summary>当前是否按着 Ctrl 键（WinUI 3 用 InputKeyboardSource 读取修饰键状态）</summary>
+    private static bool IsControlDown()
+    {
+        var state = Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(
+            Windows.System.VirtualKey.Control);
+        return (state & Windows.UI.Core.CoreVirtualKeyStates.Down) != 0;
+    }
 
     /// <summary>窗口句柄</summary>
     public IntPtr WindowHandle => _hWnd;
@@ -424,6 +460,8 @@ public sealed partial class MainWindow : Window
         };
         var icon = new Image { Height = 26 };
         button.Content = icon;
+        // 悬停提示：附属功能名称（与"更多"菜单里的文字一致，语言切换后重建）
+        ToolTipService.SetToolTip(button, LocalizationService.Tr(feature.NameKey));
         _ = LoadAuxiliaryImageAsync(icon, feature.IconResource);
         button.Click += (_, _) => OpenAuxiliaryFeature(feature.Id);
         return button;

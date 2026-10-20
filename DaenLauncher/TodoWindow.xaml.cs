@@ -81,6 +81,13 @@ public sealed partial class TodoWindow : Window
             }
         };
 
+        // Esc 隐藏窗口（与关闭按钮/热键一致：先落盘位置再隐藏）
+        WindowKeyHelper.EnableEscapeToHide(RootGrid, () =>
+        {
+            SavePositionNow();
+            _appWindow.Hide();
+        });
+
         // 记录窗口位置（拖动/移动后防抖保存，"上次位置"显示策略用）
         // 注意：计时器必须先于 Changed 订阅创建，防止事件先到时用到 null
         _savePositionTimer = new DispatcherTimer

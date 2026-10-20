@@ -771,6 +771,13 @@ build.bat / clean.bat   双击可用的编译/清理脚本
 - **测试**：Debug 0 错误；拼音匹配/JSON 中文均用独立控制台程序实测通过。窗口尺寸恢复、搜索弹窗 UI 交互、工具框高度由用户实测。
 
 
+## 最新变更（2026-10-20 第六十二轮：取消全局 Ctrl+F 提示 / 所有窗口 Esc 隐藏）
+
+- **需求1 启动器全窗口都弹 "CTRL+F" 提示**：根因——`KeyboardAccelerator` 挂在 `RootGrid` 上时，系统会自动给该元素生成"Ctrl+F"快捷键提示，而 ToolTip 会沿视觉树被所有子元素继承，于是鼠标停在按钮/分类/空白处都显示。修复：主窗口改用 `RootGrid.PreviewKeyDown`（隧道事件，即使焦点控件处理过也能先收到）判断 Ctrl+F / Esc，彻底移除 `KeyboardAccelerator`；Ctrl 键状态用 `InputKeyboardSource.GetKeyStateForCurrentThread`（与设置页录制热键同一写法）。同时给左下角附属功能按钮补上"功能名"提示（原来只有"更多"按钮有）。现在提示只出现在项目项、附属功能图标、"更多"、设置按钮这些有意义的位置。
+- **需求2 所有窗口支持 Esc 隐藏**：新增 `Services/WindowKeyHelper.cs`——`EnableEscapeToHide(RootGrid, hide)` 用 `PreviewKeyDown` 统一实现；`IsPopupOpen` 会跳过当前打开的弹出层（下拉框/菜单/对话框的 Esc 先关自己；ToolTip 不算）。七个窗口全部接入（主/设置/待办/随手记/剪贴板/常用工具/壁纸）；随手记会先 `SaveOnClose` + 位置/尺寸落盘再隐藏，其余窗口先 `SavePositionNow`；主窗口搜索弹层打开时 Esc 只关弹层、不隐藏窗口。无设置项。
+- **版本**：1.6.5 → **1.6.6**；Debug x64 编译 0 错误 0 警告。
+- **待用户实测**：提示是否只在项目/附属图标出现、各窗口 Esc 隐藏、搜索弹层内 Esc 只关弹层。
+
 ## 当前进度
 - ✅ 需求1.md 主体 + 十八轮改进/修复全部完成；**"资源管理器菜单"需求已在第十九轮彻底移除（用户决定放弃）**。
 - ✅ 第二十轮：待办功能完成（窗口 + 本地存储 + webnote 云同步 + 设置页）。
@@ -805,6 +812,7 @@ build.bat / clean.bat   双击可用的编译/清理脚本
 - ✅ 第五十九轮：默认格子宽度 9→6（已有配置不受影响）+ 面板右键「刷新项目」（重新检测存在性 + 重提图标，失效换「项目无法找到」、恢复则换回正常图标，仅失效时提示）。版本 1.6.3。
 - ✅ 第六十轮：`其他教程.md` 排版整理（加简介 + 目录、统一分步结构）+ 新增「自定义图标分组（group_ 开头文件夹）」教程。纯文档。
 - ✅ 第六十一轮：4 需求——常用工具输入/输出框固定高度、JSON 格式化保留中文（不转 \uXXXX）、主窗口/设置/随手记窗口尺寸恢复差 16px 修复（ApplyClientSize 统一补边框差+DPI）、**Ctrl+F 项目搜索弹窗**（图标列表 + 全拼/拼音首字母匹配，TinyPinyin.Net）。版本 1.6.5。
+- ✅ 第六十二轮：鼠标到处弹 "CTRL+F" 提示修复（KeyboardAccelerator → PreviewKeyDown）+ 附属功能按钮补名称提示 + **所有窗口 Esc 隐藏**（WindowKeyHelper 统一接入）。版本 1.6.6。
 
 ## 最新变更（2026-10-09 第六十轮：`其他教程.md` 排版整理 + 新增「自定义图标分组」教程）
 
@@ -836,6 +844,7 @@ build.bat / clean.bat   双击可用的编译/清理脚本
 - **等宽网格的格子宽度必须是"外生常量"，不许由内容决定（第五十七轮，长期约束）**：平铺模式的格子宽度只能来自设置（`AppSettings.ComputeItemCellWidth()`，由项目图标大小/文字大小/横向间距算出），**一行几列 = 窗口宽度 ÷ 格子宽度**，与项目数量、文字长短完全无关；末行不满**不许拉伸铺满**。任何"让格子去适应文字内容"的做法都会让列数/列位置随数据漂移，破坏对齐（第五十六轮的错误方向、第五十七轮修正，务必不要再犯）。测量子元素时必须给宽度约束（= 格子宽 − 外边距），否则文字不换行、长名字会把格子撑爆。
 - **快捷方式解析的唯一入口是 `DropResolver.ResolveShortcutFile`（第五十六轮）**：拖拽、右键"添加项目-快捷方式"、"添加项目-文件"（选中 .lnk/.url 时）都必须走它，不允许直接把 `.lnk` 路径存进项目。**任何"目标类型判定"的新分支都要放在 `.exe` 判定之后、兜底分支之前**——兜底分支返回的是快捷方式自身（Type=Lnk），漏判就会退化成"指向 .lnk"。
 - **新窗口必须接入三项联动（第二十三轮起长期约束）**：① `RefreshTitle()` 并加入 `App.RefreshAllTitles()`（自定义软件标题）；② 窗口材质通过 `App.ApplyBackdropEverywhere()` 统一应用；③ 主题通过 `App.ApplyThemeEverywhere()`。已接入：主窗口、设置窗口、待办窗口。
+- **禁止在 `RootGrid` 上挂 `KeyboardAccelerator`（第六十二轮，长期约束）**：它会自动给根元素生成快捷键 ToolTip，且 ToolTip 沿视觉树被所有子元素继承（鼠标停哪都弹）。窗口级快捷键统一用 `RootGrid` 的 `PreviewKeyDown`；Esc 隐藏窗口统一走 `WindowKeyHelper.EnableEscapeToHide`（新窗口也要接入）。
 - **不内置 WrapPanel**：2.3.9 的 WinUI 没有 → 自己写了 `Controls/WrapPanel.cs`。
 - **托盘菜单手动弹出**：`MenuActivation=None` + `RightClickCommand` 里 `ShowContextMenu(光标位置)`，避免位置不准。
 - **热键注册在主窗口 HWND**：主窗口懒创建前热键不可用，可接受（静默启动时托盘/钩子可用）。
@@ -877,3 +886,4 @@ build.bat / clean.bat   双击可用的编译/清理脚本
 30. **netsh 输出编码跟随系统区域设置**（第五十六轮实锤）：中文 Windows 是 GBK 而非 UTF-8，读原始字节后先按 `UTF8Encoding(false, true)` 严格解码、失败回退 `CodePagesEncodingProvider` + `CurrentCulture.TextInfo.ANSICodePage`；`H:` 隐藏网络判定必须匹配"未广播"/"not broadcasting"（普通网络那行也含"广播"二字）。
 31. **给语言 JSON 插/删键必须复验**（第五十六轮）：插键后 `json.load` + 键集合对比 + **反向扫描"代码引用的键是否都有定义"**；本轮据此发现多加了一个没人引用的键。删键时注意别把锚点行的键值拆开（第四十九轮踩过）。
 32. **UIA 测试的中文/emoji 结果要写 UTF-8 文件再读**（第五十六轮）：控制台编码会丢字符（emoji 显示成 `??`），直接看输出会误判"乱码了"——实际数据没问题。另外用 heredoc 写含反斜杠的 C# 代码会被 shell 吞掉转义，改用 Write 工具或 python 写文件。
+33. **`KeyboardAccelerator` 会自动生成 ToolTip 并被全窗口继承**（第六十二轮实锤）：把 Ctrl+F 的 accelerator 挂在 `RootGrid` 后，鼠标停在任意按钮/分类/空白都弹 "CTRL+F"——因为系统给 RootGrid 自动挂了快捷键提示，ToolTip 又会沿视觉树向上找最近的提示拥有者。窗口级快捷键改用 `PreviewKeyDown` 即可；若必须用 accelerator，不要挂在铺满窗口的根容器上。

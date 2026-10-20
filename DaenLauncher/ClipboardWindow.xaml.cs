@@ -68,6 +68,13 @@ public sealed partial class ClipboardWindow : Window
             }
         };
 
+        // Esc 隐藏窗口（与关闭按钮/热键一致：先落盘位置再隐藏）
+        WindowKeyHelper.EnableEscapeToHide(RootGrid, () =>
+        {
+            SavePositionNow();
+            _appWindow.Hide();
+        });
+
         // 记录窗口位置/尺寸（防抖保存；计时器必须先于 Changed 订阅创建）
         _savePositionTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
         _savePositionTimer.Tick += SavePositionTimer_Tick;

@@ -86,6 +86,15 @@ public sealed partial class NoteWindow : Window
             }
         };
 
+        // Esc 隐藏窗口（与关闭按钮/热键一致：先落盘编辑内容、位置、尺寸再隐藏）
+        WindowKeyHelper.EnableEscapeToHide(RootGrid, () =>
+        {
+            SaveOnClose();
+            SavePositionNow();
+            SaveSizeNow();
+            appWindow.Hide();
+        });
+
         // 记录窗口位置（拖动/移动后防抖保存，"上次位置"显示策略用）
         appWindow.Changed += AppWindow_Changed;
 

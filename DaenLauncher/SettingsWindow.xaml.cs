@@ -46,6 +46,9 @@ public sealed partial class SettingsWindow : Window
             }
         };
 
+        // Esc 隐藏窗口（所有窗口统一支持，不需要设置项）
+        WindowKeyHelper.EnableEscapeToHide(RootGrid, () => _appWindow.Hide());
+
         // 任务栏图标：按尺寸创建句柄后 WM_SETICON
         try
         {

@@ -12,7 +12,7 @@ namespace DaenLauncher;
 /// <summary>
 /// 主窗口的 Ctrl+F 项目搜索弹层（partial class，界面在 MainWindow.xaml 的 SearchOverlay）。
 /// 行为：
-/// - Ctrl+F 打开/关闭弹层（KeyboardAccelerator 挂在 RootGrid 上，窗口有焦点时才触发）；
+/// - Ctrl+F 打开/关闭弹层（由 RootGrid 的 PreviewKeyDown 触发，窗口有焦点时才生效）；
 /// - 输入即筛选：项目名包含 / 全拼包含 / 拼音首字母包含（大小写不敏感，基于 TinyPinyin）；
 /// - 结果带项目图标（复用面板同款图标加载链路），显示"分类 › 子分类"位置；
 /// - ↑↓ 选择、回车启动选中项、Esc 关闭、点击结果启动、点遮罩关闭。
