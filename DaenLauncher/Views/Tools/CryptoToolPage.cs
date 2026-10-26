@@ -1,4 +1,5 @@
 using System.Text;
+using DaenLauncher.Models;
 using DaenLauncher.Services;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -38,7 +39,12 @@ internal sealed class CryptoToolPage : IToolPage
 
     private readonly CryptoAlgo _algo;
 
+    /// <summary>算法存储标识（配置文件里的 algo 字段）</summary>
+    private string AlgoId => _algo == CryptoAlgo.Sm4 ? CryptoAlgoIds.Sm4 : CryptoAlgoIds.Aes;
+
     // ===== 界面控件（Build 时创建） =====
+    private ComboBox _configCombo = null!;     // 配置下拉框（默认"不使用配置"）
+    private List<CryptoConfig> _configs = new(); // 当前算法的配置列表（下拉框索引 = 列表索引 + 1）
     private ComboBox _textFormat = null!;      // 原文格式
     private ComboBox _mode = null!;            // 加密模式
     private TextBox _keyBox = null!;           // 密钥
@@ -63,6 +69,9 @@ internal sealed class CryptoToolPage : IToolPage
     public UIElement Build()
     {
         var root = ToolKit.PageRoot();
+
+        // ===== 配置区（需求：输入框上面一个下拉框，选择后自动填充页面参数） =====
+        root.Children.Add(BuildConfigRow());
 
         // ===== 输入区 =====
         root.Children.Add(ToolKit.SectionTitle("Tools.Enc.Input"));
@@ -148,7 +157,10 @@ internal sealed class CryptoToolPage : IToolPage
 
         var encryptButton = ToolKit.PrimaryButton("Tools.Enc.Encrypt", (_, _) => RunCore(true));
         var decryptButton = ToolKit.ActionButton("Tools.Enc.Decrypt", (_, _) => RunCore(false));
-        root.Children.Add(ToolKit.ButtonRow(encryptButton, decryptButton));
+        // 需求：加密/解密按钮后面增加"保存为配置""管理配置"
+        var saveConfigButton = ToolKit.ActionButton("Tools.Enc.SaveConfig", (_, _) => _ = SaveAsConfigAsync());
+        var manageConfigButton = ToolKit.ActionButton("Tools.Enc.ManageConfig", (_, _) => OpenManageWindow());
+        root.Children.Add(ToolKit.ButtonRow(encryptButton, decryptButton, saveConfigButton, manageConfigButton));
 
         // ===== 结果区 =====
         root.Children.Add(ToolKit.SectionTitle("Tools.Enc.Output"));
@@ -158,6 +170,152 @@ internal sealed class CryptoToolPage : IToolPage
 
         UpdateIvVisibility();
         return root;
+    }
+
+    /// <summary>
+    /// 配置行：标签 + 配置下拉框（默认"不使用配置"）。
+    /// 选择某个配置后自动把该配置里的参数填到页面控件上（需求）。
+    /// </summary>
+    private StackPanel BuildConfigRow()
+    {
+        var row = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 8,
+            Margin = new Thickness(0, 2, 0, 6)
+        };
+        row.Children.Add(ToolKit.Label("Tools.Enc.Config"));
+
+        _configCombo = new ComboBox { MinWidth = 260 };
+        // 重建列表时会临时置 _suppressConfigFill，避免清空/填充项时误触发"自动填充页面"
+        _configCombo.SelectionChanged += (_, _) =>
+        {
+            if (!_suppressConfigFill) ApplySelectedConfig();
+        };
+        row.Children.Add(_configCombo);
+
+        RebuildConfigList();
+        return row;
+    }
+
+    /// <summary>重建配置下拉框时抑制 SelectionChanged 的填充逻辑</summary>
+    private bool _suppressConfigFill;
+
+    /// <summary>
+    /// 重建配置下拉框（选择/保存/删除配置后调用）。
+    /// 索引 0 = "不使用配置"，索引 i+1 = _configs[i]。
+    /// </summary>
+    private void RebuildConfigList(string? selectId = null)
+    {
+        _configs = CryptoConfigService.Instance.GetConfigs(AlgoId);
+
+        _suppressConfigFill = true;
+        try
+        {
+            _configCombo.Items.Clear();
+            _configCombo.Items.Add(LocalizationService.Tr("Tools.Enc.ConfigNone"));
+            foreach (var config in _configs)
+            {
+                _configCombo.Items.Add(config.Name);
+            }
+
+            var index = selectId == null ? 0 : _configs.FindIndex(c => c.Id == selectId) + 1;
+            _configCombo.SelectedIndex = index < 0 || index > _configs.Count ? 0 : index;
+        }
+        finally
+        {
+            _suppressConfigFill = false;
+        }
+    }
+
+    /// <summary>把当前选中配置的参数填充到页面控件（需求：选择后自动填充页面上的信息）</summary>
+    private void ApplySelectedConfig()
+    {
+        var index = _configCombo.SelectedIndex;
+        if (index <= 0 || index > _configs.Count) return; // "不使用配置"：不改动页面
+
+        var config = _configs[index - 1];
+        ToolKit.SelectKey(_textFormat, config.TextFormat);
+        ToolKit.SelectKey(_mode, config.Mode);
+        _keyBox.Text = config.Key;
+        ToolKit.SelectKey(_keyFormat, config.KeyFormat);
+        _ivBox.Text = config.Iv;
+        ToolKit.SelectKey(_ivFormat, config.IvFormat);
+        ToolKit.SelectKey(_padding, config.Padding);
+        ToolKit.SelectKey(_outputFormat, config.OutputFormat);
+        _upperCheck.IsChecked = config.Upper;
+        UpdateIvVisibility();
+    }
+
+    /// <summary>把页面当前的参数收集成一套配置对象</summary>
+    private CryptoConfig CollectConfig(string name) => new()
+    {
+        Name = name,
+        Algo = AlgoId,
+        TextFormat = ToolKit.SelectedKey(_textFormat),
+        Mode = ToolKit.SelectedKey(_mode),
+        Key = _keyBox.Text,
+        KeyFormat = ToolKit.SelectedKey(_keyFormat),
+        Iv = _ivBox.Text,
+        IvFormat = ToolKit.SelectedKey(_ivFormat),
+        Padding = ToolKit.SelectedKey(_padding),
+        OutputFormat = ToolKit.SelectedKey(_outputFormat),
+        Upper = _upperCheck.IsChecked == true
+    };
+
+    /// <summary>"保存为配置"：弹出输入框让用户填配置名，保存后自动选中该配置</summary>
+    private async Task SaveAsConfigAsync()
+    {
+        var nameBox = new TextBox
+        {
+            PlaceholderText = LocalizationService.Tr("Tools.Enc.ConfigNamePlaceholder")
+        };
+        var dialog = new ContentDialog
+        {
+            XamlRoot = _input.XamlRoot,
+            Title = LocalizationService.Tr("Tools.Enc.ConfigNameTitle"),
+            Content = nameBox,
+            PrimaryButtonText = LocalizationService.Tr("Dialog.Save"),
+            CloseButtonText = LocalizationService.Tr("Dialog.Cancel"),
+            DefaultButton = ContentDialogButton.Primary,
+            IsPrimaryButtonEnabled = false
+        };
+        nameBox.TextChanged += (_, _) =>
+            dialog.IsPrimaryButtonEnabled = nameBox.Text.Trim().Length > 0;
+
+        if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
+
+        var name = nameBox.Text.Trim();
+        if (CryptoConfigService.Instance.NameExists(AlgoId, name))
+        {
+            await ShowInfoAsync(LocalizationService.Tr("Tools.Enc.ConfigNameDuplicate"));
+            return;
+        }
+
+        var config = CollectConfig(name);
+        CryptoConfigService.Instance.Add(config);
+        RebuildConfigList(config.Id);
+        await ShowInfoAsync(LocalizationService.Tr("Tools.Enc.ConfigSaved"));
+    }
+
+    /// <summary>"管理配置"：打开独立的配置管理窗口（只支持删除，需求）</summary>
+    private void OpenManageWindow()
+    {
+        // 关闭管理窗口后刷新下拉框（配置可能被删掉）
+        CryptoConfigWindow.ShowOrActivate(() => RebuildConfigList());
+    }
+
+    /// <summary>简单信息弹窗</summary>
+    private async Task ShowInfoAsync(string message)
+    {
+        var dialog = new ContentDialog
+        {
+            XamlRoot = _input.XamlRoot,
+            Content = message,
+            CloseButtonText = LocalizationService.Tr("Dialog.Ok"),
+            DefaultButton = ContentDialogButton.Close
+        };
+        await dialog.ShowAsync();
     }
 
     /// <summary>ECB 模式没有 IV，隐藏 IV 整行和标签</summary>

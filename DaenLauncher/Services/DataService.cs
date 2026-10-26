@@ -17,7 +17,9 @@ public static class DataService
         ("todo", new[] { "todo" }),
         ("note", new[] { "note" }),
         ("clipboard", new[] { "clipboard" }),
-        ("wallpaper", new[] { "wallpaper" })
+        ("wallpaper", new[] { "wallpaper" }),
+        // 常用工具数据（加解密配置等，需求：支持常用工具的导出和导入）
+        ("tools", new[] { "tools" })
     };
 
     /// <summary>某个数据项的文件夹是否存在于本地</summary>

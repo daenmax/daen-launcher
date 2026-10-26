@@ -289,7 +289,9 @@ public static class Dialogs
 
     /// <summary>
     /// 输入地址创建项目的弹窗（网址 / 协议共用，需求：添加项目）。
-    /// 带实时校验：网址必须 http/https 开头；协议必须是 scheme: 形式（如 steam://rungameid/993090）。
+    /// 带实时校验：网址支持 http/https/ftp 以及 mailto:/tel:/sms: 等格式（裸域名自动补 https://）；
+    /// 协议必须是 scheme: 形式（如 steam://rungameid/993090）。
+    /// 网址类项目还可以填写备注（需求：添加网址类项目支持备注字段）。
     /// 返回新项目，取消返回 null。
     /// </summary>
     public static async Task<LauncherItem?> TextItemDialogAsync(XamlRoot xamlRoot, LauncherItemType type)
@@ -302,6 +304,7 @@ public static class Dialogs
             PlaceholderText = loc.T(isUrl ? "Dialog.ItemUrl" : "Dialog.ItemProtocol")
         };
         var nameBox = new TextBox { PlaceholderText = loc.T("Dialog.ItemName") };
+        var remarkBox = new TextBox { PlaceholderText = loc.T("Dialog.ItemRemark") };
         var hintText = new TextBlock
         {
             Text = loc.T(isUrl ? "Dialog.UrlInvalid" : "Dialog.ProtocolInvalid"),
@@ -311,9 +314,24 @@ public static class Dialogs
             Visibility = Visibility.Collapsed
         };
 
+        // 带标签的行（与其他编辑弹窗风格一致）
+        StackPanel LabeledRow(string labelKey, FrameworkElement input)
+        {
+            var row = new StackPanel { Spacing = 4 };
+            row.Children.Add(new TextBlock
+            {
+                Text = loc.T(labelKey),
+                FontSize = 13,
+                Opacity = 0.8
+            });
+            row.Children.Add(input);
+            return row;
+        }
+
         var content = new StackPanel { Spacing = 10 };
-        content.Children.Add(pathBox);
-        content.Children.Add(nameBox);
+        content.Children.Add(LabeledRow(isUrl ? "Dialog.ItemUrlLabel" : "Dialog.ItemProtocolLabel", pathBox));
+        content.Children.Add(LabeledRow("Dialog.ItemNameLabel", nameBox));
+        content.Children.Add(LabeledRow("Dialog.ItemRemarkLabel", remarkBox));
         content.Children.Add(hintText);
 
         var dialog = new ContentDialog
@@ -335,53 +353,50 @@ public static class Dialogs
         pathBox.TextChanged += (_, _) =>
         {
             var text = pathBox.Text.Trim();
-            var valid = IsTextItemValid(text, isUrl);
+            var valid = isUrl
+                ? LauncherItemPathKinds.IsValidUrlInput(text)
+                : LauncherItemPathKinds.IsValidProtocolInput(text);
             hintText.Visibility = !valid && text.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
             dialog.IsPrimaryButtonEnabled = valid;
 
             // 网址：名称没手动填过时用主机名自动填充（www.example.com → www.example.com）
-            if (isUrl && !nameEdited && Uri.TryCreate(text, UriKind.Absolute, out var uri))
+            if (isUrl && !nameEdited && valid)
             {
-                nameBox.Text = uri.Host;
+                var normalized = LauncherItemPathKinds.NormalizeUrlInput(text);
+                if (Uri.TryCreate(normalized, UriKind.Absolute, out var uri) && !string.IsNullOrEmpty(uri.Host))
+                {
+                    nameBox.Text = uri.Host;
+                }
+                else
+                {
+                    // mailto:/tel: 等没有主机名：用冒号后的内容作为名称
+                    nameBox.Text = normalized;
+                }
             }
         };
 
         var result = await dialog.ShowAsync();
         if (result != ContentDialogResult.Primary) return null;
 
-        var path = pathBox.Text.Trim();
+        // 网址统一规范化（裸域名补 https://），协议保持用户输入
+        var path = isUrl
+            ? LauncherItemPathKinds.NormalizeUrlInput(pathBox.Text)
+            : pathBox.Text.Trim();
         var name = nameBox.Text.Trim();
         if (string.IsNullOrEmpty(name))
         {
             // 名称留空：网址用主机名，协议用地址本身
-            if (isUrl && Uri.TryCreate(path, UriKind.Absolute, out var uri)) name = uri.Host;
+            if (isUrl && Uri.TryCreate(path, UriKind.Absolute, out var uri) && !string.IsNullOrEmpty(uri.Host)) name = uri.Host;
             else name = path;
         }
-        return new LauncherItem { Name = name, Path = path, Type = type };
-    }
-
-    /// <summary>网址/协议地址校验</summary>
-    private static bool IsTextItemValid(string text, bool isUrl)
-    {
-        if (string.IsNullOrWhiteSpace(text)) return false;
-
-        if (isUrl)
+        return new LauncherItem
         {
-            return Uri.TryCreate(text, UriKind.Absolute, out var uri)
-                   && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps)
-                   && !string.IsNullOrEmpty(uri.Host);
-        }
-
-        // 协议：scheme 以字母开头，可含 数字/+/-.，后跟冒号（如 steam://、ms-settings:）
-        var match = System.Text.RegularExpressions.Regex.Match(text, ProtocolPattern);
-        if (!match.Success) return false;
-        var scheme = match.Value.TrimEnd(':').ToLowerInvariant();
-        // http/https 属于"网址"类型，不算协议
-        return scheme != Uri.UriSchemeHttp && scheme != Uri.UriSchemeHttps;
+            Name = name,
+            Path = path,
+            Type = type,
+            Remark = remarkBox.Text.Trim()
+        };
     }
-
-    /// <summary>协议地址格式（scheme: 形式，如 steam://rungameid/993090、ms-settings:）</summary>
-    private const string ProtocolPattern = @"^[a-zA-Z][a-zA-Z0-9+.\-]*:";
 
     /// <summary>
     /// UWP 应用选择弹窗（需求：添加项目-UWP 应用，列出系统安装的微软商店应用）。

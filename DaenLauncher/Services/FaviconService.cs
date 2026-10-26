@@ -5,6 +5,7 @@ using System.IO;
 using System.Net;
 using System.Net.Http;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 
 namespace DaenLauncher.Services;
@@ -33,6 +34,8 @@ public static class FaviconService
 
     /// <summary>
     /// 下载网址的图标并重编码为 PNG 字节。失败返回 null。
+    /// 抓取顺序：站点根 favicon.ico → 首页 &lt;link rel="icon"&gt; 声明的图标（支持相对路径 /
+    /// &lt;base href&gt; / SPA 的 #/ 路由）→ apple-touch-icon.png 兜底。
     /// </summary>
     public static async Task<byte[]?> DownloadPngAsync(string url)
     {
@@ -40,25 +43,32 @@ public static class FaviconService
         {
             if (string.IsNullOrWhiteSpace(url)) return null;
 
-            // 规范化为绝对地址（用户可能只填了 www.example.com）
+            // 规范化为绝对地址（用户可能只填了 www.example.com），并去掉 # 片段
+            // （SPA 的 #/ 路由只对浏览器有意义，服务端只认路径部分）
             var normalized = url.StartsWith("http", StringComparison.OrdinalIgnoreCase)
                 ? url
                 : "https://" + url.TrimStart('/');
-            if (!Uri.TryCreate(normalized, UriKind.Absolute, out var baseUri)) return null;
+            if (!Uri.TryCreate(normalized, UriKind.Absolute, out var inputUri)) return null;
+            var pageUri = new UriBuilder(inputUri) { Fragment = "" }.Uri;
 
-            // ①/② 默认位置：https 优先，失败退 http
-            var (png, reachable) = await TryDownloadAsync($"{baseUri.Scheme}://{baseUri.Authority}/favicon.ico");
-            if (png == null && reachable)
+            // ① 默认位置：站点根 favicon.ico（https 优先，失败再试 http）
+            foreach (var rootUrl in RootCandidates(pageUri))
             {
-                (png, reachable) = await TryDownloadAsync($"http://{baseUri.Authority}/favicon.ico");
+                var png = await TryDownloadAsync(rootUrl);
+                if (png != null) return png;
             }
 
-            // ③ 解析首页 HTML 的 <link rel="icon"> 声明（站点可达才有意义，连不上就直接放弃）
-            if (png == null && reachable)
+            // ② 解析首页 HTML 里的图标声明。
+            // 注意：这里不能因为"http 版本 favicon 请求失败"就跳过——很多站点只开 https，
+            // 旧实现因此永远走不到这一步（表现为某些网址始终没有图标）。
+            var candidates = await FindPageIconCandidatesAsync(pageUri);
+            foreach (var candidate in candidates)
             {
-                (png, _) = await TryDownloadFromHtmlAsync(baseUri);
+                var png = await TryDownloadAsync(candidate);
+                if (png != null) return png;
             }
-            return png;
+
+            return null;
         }
         catch
         {
@@ -66,63 +76,101 @@ public static class FaviconService
         }
     }
 
-    /// <summary>下载一个 URL 并解码成 PNG 字节。reachable = 站点是否可达
-    /// （连不上时调用方可以直接放弃后续尝试，省掉无意义的超时等待）</summary>
-    private static async Task<(byte[]? Png, bool Reachable)> TryDownloadAsync(string url)
+    /// <summary>站点根目录的图标候选地址（favicon.ico / apple-touch-icon.png）</summary>
+    private static IEnumerable<string> RootCandidates(Uri pageUri)
+    {
+        var authority = pageUri.Authority;
+        yield return $"{pageUri.Scheme}://{authority}/favicon.ico";
+        // 部分站点只有 http 可访问（https 直接拒绝连接）
+        yield return $"http://{authority}/favicon.ico";
+        yield return $"{pageUri.Scheme}://{authority}/apple-touch-icon.png";
+    }
+
+    /// <summary>下载一个 URL 并解码成 PNG 字节；失败返回 null（超时/连不上/不是图片）</summary>
+    private static async Task<byte[]?> TryDownloadAsync(string url)
     {
         try
         {
             using var request = new HttpRequestMessage(HttpMethod.Get, url);
             request.Headers.UserAgent.ParseAdd(UserAgent);
             using var response = await Http.SendAsync(request);
-            if (!response.IsSuccessStatusCode) return (null, true);
+            if (!response.IsSuccessStatusCode) return null;
 
             var bytes = await response.Content.ReadAsByteArrayAsync();
-            return (EncodeToPng(bytes), true);
+            return EncodeToPng(bytes);
         }
         catch
         {
-            // 超时/连接失败
-            return (null, false);
+            return null;
         }
     }
 
-    /// <summary>下载首页 HTML，解析 &lt;link rel="icon"&gt; 的地址并下载图标</summary>
-    private static async Task<(byte[]? Png, bool Reachable)> TryDownloadFromHtmlAsync(Uri baseUri)
+    /// <summary>
+    /// 下载首页 HTML，解析 &lt;link rel="icon"&gt; 的地址（相对地址按 &lt;base href&gt;
+    /// 或页面地址解析），返回去重后的绝对地址列表（找不到返回空列表）。
+    /// </summary>
+    private static async Task<List<string>> FindPageIconCandidatesAsync(Uri pageUri)
+    {
+        var html = await DownloadPageHtmlAsync(pageUri);
+        if (html == null)
+        {
+            // https 打不开首页时再试 http（部分内网站点未配置证书）
+            var httpUri = new UriBuilder(pageUri) { Scheme = Uri.UriSchemeHttp }.Uri;
+            html = await DownloadPageHtmlAsync(httpUri);
+        }
+        if (html == null) return new List<string>();
+
+        return FindIconCandidates(html, pageUri);
+    }
+
+    /// <summary>下载页面 HTML 的前 256KB（返回 null 表示请求失败）</summary>
+    private static async Task<string?> DownloadPageHtmlAsync(Uri pageUri)
     {
         try
         {
-            using var request = new HttpRequestMessage(HttpMethod.Get, baseUri);
+            using var request = new HttpRequestMessage(HttpMethod.Get, pageUri);
             request.Headers.UserAgent.ParseAdd(UserAgent);
             using var response = await Http.SendAsync(request);
-            if (!response.IsSuccessStatusCode) return (null, true);
+            if (!response.IsSuccessStatusCode) return null;
 
             // 只读前 256KB，够找到 <link> 声明（避免超大页面浪费流量）
-            var stream = await response.Content.ReadAsStreamAsync();
+            await using var stream = await response.Content.ReadAsStreamAsync();
             using var reader = new StreamReader(stream, Encoding.UTF8);
             var buffer = new char[256 * 1024];
-            var read = await reader.ReadAsync(buffer, 0, buffer.Length);
-            var html = new string(buffer, 0, read);
-
-            var iconUrl = FindIconLinkUrl(html, baseUri);
-            if (iconUrl == null) return (null, true);
-            return await TryDownloadAsync(iconUrl);
+            // ReadBlockAsync 保证尽量填满缓冲区（ReadAsync 可能只返回当前已到达的部分）
+            var read = await reader.ReadBlockAsync(buffer, 0, buffer.Length);
+            return new string(buffer, 0, read);
         }
         catch
         {
-            return (null, false);
+            return null;
         }
     }
 
-    /// <summary>从 HTML 里找图标声明，解析成绝对 URL；找不到返回 null。
-    /// 优先 apple-touch-icon（通常尺寸最大最好看），其次任意 rel 含 icon 的 link。</summary>
-    private static string? FindIconLinkUrl(string html, Uri baseUri)
+    /// <summary>
+    /// 从 HTML 里找图标声明，解析成绝对 URL；找不到返回空列表。
+    /// 顺序：apple-touch-icon（通常尺寸最大最好看）→ 其他 rel 含 icon 的声明。
+    /// 相对路径按 &lt;base href&gt;（若有）或页面地址解析——这是 "images/logo-64.png"
+    /// 这类写法的关键。
+    /// </summary>
+    private static List<string> FindIconCandidates(string html, Uri pageUri)
     {
-        // 收集所有 <link> 标签里 rel 含 icon 的 href
-        var candidates = new List<string>();
-        foreach (System.Text.RegularExpressions.Match tag in
-                 System.Text.RegularExpressions.Regex.Matches(
-                     html, @"<link\b[^>]*>", System.Text.RegularExpressions.RegexOptions.IgnoreCase))
+        // 页面可能声明了 <base href="...">，相对地址要以它为基准
+        var baseUri = pageUri;
+        var baseMatch = Regex.Match(html, @"<base\b[^>]*>", RegexOptions.IgnoreCase);
+        if (baseMatch.Success)
+        {
+            var baseHref = GetAttribute(baseMatch.Value, "href");
+            if (!string.IsNullOrWhiteSpace(baseHref) &&
+                Uri.TryCreate(pageUri, baseHref.Trim(), out var resolvedBase))
+            {
+                baseUri = resolvedBase;
+            }
+        }
+
+        var appleTouch = new List<string>();
+        var others = new List<string>();
+        foreach (Match tag in Regex.Matches(html, @"<link\b[^>]*>", RegexOptions.IgnoreCase))
         {
             var tagText = tag.Value;
             var rel = GetAttribute(tagText, "rel");
@@ -131,26 +179,30 @@ public static class FaviconService
             var href = GetAttribute(tagText, "href");
             if (string.IsNullOrWhiteSpace(href)) continue;
 
-            // 相对地址转绝对地址（/favicon.ico、//cdn.xxx/a.png、icon.png 等）
-            if (Uri.TryCreate(baseUri, href.Trim(), out var absolute))
+            // 相对地址转绝对地址（/favicon.ico、//cdn.xxx/a.png、images/logo.png 等）
+            if (!Uri.TryCreate(baseUri, href.Trim(), out var absolute)) continue;
+            var value = absolute.ToString();
+            if (rel.Contains("apple-touch", StringComparison.OrdinalIgnoreCase))
             {
-                candidates.Add(absolute.ToString());
-                // apple-touch-icon 一般是最大尺寸的高清图，找到就直接用
-                if (rel.Contains("apple-touch", StringComparison.OrdinalIgnoreCase))
-                {
-                    return absolute.ToString();
-                }
+                appleTouch.Add(value);
+            }
+            else
+            {
+                others.Add(value);
             }
         }
-        return candidates.Count > 0 ? candidates[0] : null;
+
+        return appleTouch.Concat(others)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
     }
 
     /// <summary>从标签文本里取属性值（href="..." / href='...' / href=...）</summary>
     private static string? GetAttribute(string tag, string name)
     {
-        var match = System.Text.RegularExpressions.Regex.Match(
+        var match = Regex.Match(
             tag, $@"{name}\s*=\s*(""([^""]*)""|'([^']*)'|([^\s>]+))",
-            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            RegexOptions.IgnoreCase);
         if (!match.Success) return null;
         return match.Groups[2].Success ? match.Groups[2].Value
              : match.Groups[3].Success ? match.Groups[3].Value

@@ -372,14 +372,19 @@ public sealed partial class TodoWindow : Window
         UpdateColorVisuals();
     }
 
-    /// <summary>十六进制色值（#RRGGBB）转 Color</summary>
+    /// <summary>
+    /// 十六进制色值（#RRGGBB）转 Color。
+    /// 注意：FromArgb 的参数顺序是 (A, R, G, B)，第一个必须是透明度 255。
+    /// 这里以前把 R 当成了 A、G 当成 R、B 当成 G、255 当成 B，导致所有颜色条/色块
+    /// 渲染成蓝紫色系（"换色没效果"的根因，见 JOB.md）。
+    /// </summary>
     private static Windows.UI.Color ColorConverter(string hex)
     {
         return Microsoft.UI.ColorHelper.FromArgb(
+            255,
             Convert.ToByte(hex[1..3], 16),
             Convert.ToByte(hex[3..5], 16),
-            Convert.ToByte(hex[5..7], 16),
-            255);
+            Convert.ToByte(hex[5..7], 16));
     }
 
     /// <summary>点击颜色按钮：切换过滤状态</summary>
@@ -773,10 +778,26 @@ public sealed partial class TodoWindow : Window
         }
     }
 
-    /// <summary>输入框失焦：恢复"添加任务"按钮（短暂延迟避免回车添加时提前触发）</summary>
+    /// <summary>
+    /// 输入框失焦：有内容就自动保存为新任务，然后恢复"添加任务"按钮（需求：
+    /// 鼠标点击其他地方也要自动保存，不能把刚填的内容丢掉）。
+    /// 回车添加时输入框已被清空，这里不会重复添加。
+    /// </summary>
     private void AddTextBox_LostFocus(object sender, RoutedEventArgs e)
     {
+        var text = AddTextBox.Text.Trim();
         ExitAddMode();
+        if (text.Length == 0) return;
+
+        _ = RunWriteOperationAsync(() =>
+        {
+            _todo.Data.Items.Add(new TodoItem
+            {
+                Text = text,
+                Color = _colorFilter,
+                CreatedAt = DateTime.Now
+            });
+        });
     }
 
     /// <summary>退出行内编辑模式，恢复"添加任务"按钮</summary>
@@ -827,24 +848,25 @@ public sealed partial class TodoWindow : Window
         content.Children.Add(new TextBlock { Text = LocalizationService.Tr("Todo.Content"), Tag = "Todo.Content" });
         fields.TextBox = new TextBox
         {
-            Text = text,
             AcceptsReturn = true,
             TextWrapping = TextWrapping.Wrap,
             MinHeight = 60,
             MaxLength = 2000
         };
+        // 多行属性必须在赋 Text 之前设置，否则带换行的内容会被截断在第一个换行处
+        fields.TextBox.Text = text;
         content.Children.Add(fields.TextBox);
 
         // ===== 备注（需求：输入框默认 5 行的高度） =====
         content.Children.Add(new TextBlock { Text = LocalizationService.Tr("Todo.Notes"), Tag = "Todo.Notes" });
         fields.NotesBox = new TextBox
         {
-            Text = notes,
             AcceptsReturn = true,
             TextWrapping = TextWrapping.Wrap,
             Height = 118, // 约 5 行
             MaxLength = 2000
         };
+        fields.NotesBox.Text = notes;
         // 附加属性不能写在对象初始化器里，这里单独设置：备注超长时出现纵向滚动条
         fields.NotesBox.SetValue(ScrollViewer.VerticalScrollBarVisibilityProperty, ScrollBarVisibility.Auto);
         content.Children.Add(fields.NotesBox);

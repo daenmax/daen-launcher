@@ -251,12 +251,11 @@ public static class DropResolver
         }
     }
 
-    /// <summary>判断地址是普通网址（http/https）还是特殊协议（steam:// 等）。
+    /// <summary>判断地址是普通网址（http/https/ftp/mailto 等）还是特殊协议（steam:// 等）。
     /// .url 文件里声明的地址直接可信，不需要 .lnk 目标那套存在性检查。</summary>
     private static LauncherItemType ClassifyUrl(string url)
     {
-        return url.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
-               url.StartsWith("https://", StringComparison.OrdinalIgnoreCase)
+        return LauncherItemPathKinds.IsUrlLike(url)
             ? LauncherItemType.Url
             : LauncherItemType.Protocol;
     }

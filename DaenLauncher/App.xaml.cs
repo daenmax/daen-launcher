@@ -48,6 +48,12 @@ public partial class App : Application
         Instance = this;
         UiDispatcherQueue = DispatcherQueue.GetForCurrentThread();
 
+        // 注意：不要在这里覆盖 Application.Resources 里的 SymbolThemeFontFamily！
+        // WinUI 3 在 App 构造阶段向应用资源字典写入键会在运行时抛 0x8000FFFF（stowed exception），
+        // 表现就是"进程起来、没有窗口、几秒后崩溃"（本轮踩过的坑，见 JOB.md）。
+        // Win10 的图标兼容由 FluentGlyphs.FontFamilyName 动态选择字体解决（显式指定字体的 FontIcon），
+        // 未指定字体的 FontIcon 由 WinUI 自带的 SymbolThemeFontFamily 按系统版本解析。
+
         // 全局异常日志（写入 data\crash.log，方便排查启动问题）
         UnhandledException += (_, e) =>
         {
@@ -142,6 +148,9 @@ public partial class App : Application
         // ===== 剪贴板：加载本地数据并按设置开始/停止监听系统剪贴板 =====
         ClipboardService.Instance.Initialize();
 
+        // ===== 常用工具：加载加解密配置（data\tools\crypto-configs.json）=====
+        CryptoConfigService.Instance.Initialize();
+
         // ===== 必应壁纸：加载更换记录；开启"每日自动更换"且今天没换过则后台自动更换 =====
         WallpaperService.Instance.Initialize();
 
@@ -153,6 +162,12 @@ public partial class App : Application
         {
             ShowMainWindow();
         }
+
+        // ===== 应用更新（需求）=====
+        // ① 上次是"更新后重启"：托盘提示"更新完成"/"自动更新完成"；
+        // ② 勾选了"自动检查版本更新"：后台静默检查（不阻塞启动）。
+        UpdateService.Instance.ShowPendingResultIfAny();
+        _ = Task.Run(UpdateService.Instance.RunStartupCheckAsync);
     }
 
     #region 窗口管理
@@ -478,6 +493,30 @@ public partial class App : Application
 
     /// <summary>托盘菜单文字刷新（语言切换后）</summary>
     public void RefreshTrayLocalization() => _trayService?.RefreshLocalization();
+
+    /// <summary>
+    /// 在 UI 线程执行一段操作（后台服务回调界面时用；已在 UI 线程则直接执行）。
+    /// </summary>
+    public void UiDispatcherQueueSafe(Action action)
+    {
+        if (UiDispatcherQueue == null)
+        {
+            action();
+            return;
+        }
+        if (UiDispatcherQueue.HasThreadAccess)
+        {
+            action();
+        }
+        else
+        {
+            UiDispatcherQueue.TryEnqueue(() => action());
+        }
+    }
+
+    /// <summary>弹出托盘气泡通知（应用更新提示用，需求）</summary>
+    public void ShowTrayNotification(string title, string message) =>
+        UiDispatcherQueueSafe(() => _trayService?.ShowNotification(title, message));
 
     /// <summary>
     /// 把主题应用到所有已创建的窗口（设置页切换主题后调用，立即生效）。

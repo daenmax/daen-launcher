@@ -150,6 +150,16 @@ public enum ProxyMode
     Socks5
 }
 
+/// <summary>更新渠道（需求-设置-常规：默认 GitHub 代理）</summary>
+public enum UpdateChannel
+{
+    /// <summary>GitHub 原始地址（直连 github.com，国内可能较慢）</summary>
+    GitHubRaw,
+
+    /// <summary>GitHub 代理（经 gh-proxy.org 中转，国内访问更稳定，默认）</summary>
+    GitHubProxy
+}
+
 /// <summary>窗口材质</summary>
 public enum BackdropKind
 {

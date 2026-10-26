@@ -36,6 +36,20 @@ public sealed class ClipboardService
     /// <summary>数据变化（新增记录/删除/归档/清除）后触发，剪贴板窗口订阅刷新列表</summary>
     public event Action? DataChanged;
 
+    /// <summary>
+    /// 数据版本号：每次内容变化 +1。
+    /// 剪贴板窗口用它判断"数据有没有变"，没变就直接复用已建好的行，
+    /// 避免每次打开窗口都重建列表、重新解码图片（需求：打开窗口太慢）。
+    /// </summary>
+    public int DataVersion { get; private set; }
+
+    /// <summary>数据变化统一入口：版本号 +1 并通知订阅者</summary>
+    private void NotifyChanged()
+    {
+        DataVersion++;
+        DataChanged?.Invoke();
+    }
+
     /// <summary>轮询计时器（UI 线程创建）</summary>
     private DispatcherTimer? _pollTimer;
 
@@ -258,7 +272,7 @@ public sealed class ClipboardService
         _data.Items.Insert(0, entry);
         TrimToMax();
         Persist();
-        DataChanged?.Invoke();
+        NotifyChanged();
     }
 
     /// <summary>按设置的最大记录数裁剪（从最旧的一端删，删掉的图片文件一并删除）</summary>
@@ -276,7 +290,7 @@ public sealed class ClipboardService
         if (removedAny)
         {
             Persist();
-            DataChanged?.Invoke();
+            NotifyChanged();
         }
     }
 
@@ -291,7 +305,7 @@ public sealed class ClipboardService
     {
         _store.Reload();
         _data = _store.Load();
-        DataChanged?.Invoke();
+        NotifyChanged();
     }
 
     #region 写操作（窗口调用）
@@ -303,7 +317,7 @@ public sealed class ClipboardService
         {
             _data.Archives.Insert(0, entry);
             Persist();
-            DataChanged?.Invoke();
+            NotifyChanged();
         }
     }
 
@@ -315,7 +329,7 @@ public sealed class ClipboardService
             _data.Items.Insert(0, entry);
             TrimToMax();
             Persist();
-            DataChanged?.Invoke();
+            NotifyChanged();
         }
     }
 
@@ -328,7 +342,7 @@ public sealed class ClipboardService
         }
         DeleteEntryFiles(entry);
         Persist();
-        DataChanged?.Invoke();
+        NotifyChanged();
     }
 
     /// <summary>清除全部记录（不动归档，需求）</summary>
@@ -340,7 +354,7 @@ public sealed class ClipboardService
         }
         _data.Items.Clear();
         Persist();
-        DataChanged?.Invoke();
+        NotifyChanged();
     }
 
     /// <summary>清除全部归档</summary>
@@ -352,7 +366,7 @@ public sealed class ClipboardService
         }
         _data.Archives.Clear();
         Persist();
-        DataChanged?.Invoke();
+        NotifyChanged();
     }
 
     /// <summary>删除条目对应的图片文件（文本/文件条目无文件）</summary>
@@ -380,7 +394,7 @@ public sealed class ClipboardService
     {
         entry.Text = newText;
         Persist();
-        DataChanged?.Invoke();
+        NotifyChanged();
     }
 
     #endregion

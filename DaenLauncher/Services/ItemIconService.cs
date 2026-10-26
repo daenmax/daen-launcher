@@ -149,7 +149,8 @@ public static class ItemIconService
             }
 
             byte[]? pngBytes;
-            if (item.Type == DaenLauncher.Models.LauncherItemType.Url)
+            if (item.Type == DaenLauncher.Models.LauncherItemType.Url &&
+                LauncherItemPathKinds.SupportsFavicon(item.Path))
             {
                 // 网址：联网取站点 favicon（第五十二轮需求）
                 if (HasFailedFavicon(item.Path)) return null;
@@ -176,8 +177,9 @@ public static class ItemIconService
                         {
                             // UWP/商店应用：从 shell:AppsFolder 项提取应用图标
                             DaenLauncher.Models.LauncherItemType.Uwp => ExtractUwpIconPng(item.Path),
-                            // 协议：提取协议默认处理程序（如 steam:// → Steam）的图标
+                            // 协议 / mailto: 等非网页网址：提取协议默认处理程序（如 steam:// → Steam）的图标
                             DaenLauncher.Models.LauncherItemType.Protocol => ExtractProtocolIconPng(item.Path),
+                            DaenLauncher.Models.LauncherItemType.Url => ExtractProtocolIconPng(item.Path),
                             _ => ExtractIconPng(item.Path)
                         };
                 });

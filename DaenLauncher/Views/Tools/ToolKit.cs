@@ -246,6 +246,17 @@ internal static class ToolKit
         return keys[index];
     }
 
+    /// <summary>按语言键设置下拉框选中项（找不到时保持原样）</summary>
+    public static void SelectKey(ComboBox combo, string key)
+    {
+        if (combo.Tag is not string[] keys) return;
+        var index = Array.IndexOf(keys, key);
+        if (index >= 0 && index < combo.Items.Count)
+        {
+            combo.SelectedIndex = index;
+        }
+    }
+
     /// <summary>数字输入框（带范围钳制）</summary>
     public static NumberBox NumberBox(double min, double max, double value, double width = 160)
     {

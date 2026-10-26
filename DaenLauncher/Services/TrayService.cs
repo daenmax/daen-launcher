@@ -198,6 +198,22 @@ public sealed class TrayService : IDisposable
         if (_trayIcon != null) _trayIcon.ToolTipText = App.GetDisplayTitle();
     }
 
+    /// <summary>
+    /// 弹出托盘气泡通知（需求：发现新版本 / 更新完成时通过托盘提示用户）。
+    /// 任何失败（系统关闭了通知、托盘还没创建）都忽略，不影响主流程。
+    /// </summary>
+    public void ShowNotification(string title, string message)
+    {
+        try
+        {
+            _trayIcon?.ShowNotification(title, message, NotificationIcon.Info);
+        }
+        catch
+        {
+            // 通知失败不阻塞
+        }
+    }
+
     public void Dispose()
     {
         _trayIcon?.Dispose();

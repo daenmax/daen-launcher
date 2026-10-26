@@ -19,6 +19,7 @@ public sealed partial class SettingsWindow : Window
 
     private IntPtr _hWnd;
     private AppWindow _appWindow = null!;
+    private OverlappedPresenter? _presenter;
     private System.Drawing.Icon? _titleBarIconSmall;
     private System.Drawing.Icon? _titleBarIconBig;
 
@@ -30,6 +31,14 @@ public sealed partial class SettingsWindow : Window
         _hWnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
         var windowId = Microsoft.UI.Win32Interop.GetWindowIdFromWindow(_hWnd);
         _appWindow = AppWindow.GetFromWindowId(windowId);
+        _presenter = _appWindow.Presenter as OverlappedPresenter;
+
+        // 设置窗口始终置顶（需求）：比启动器窗口都要上层。
+        // 两个窗口同为置顶时，最后激活的在上层，所以显示时还会再调 BringToTopMost。
+        if (_presenter != null)
+        {
+            _presenter.IsAlwaysOnTop = true;
+        }
 
         Title = App.GetDisplayTitle() + " " + LocalizationService.Tr("Settings.Title");
         ExtendsContentIntoTitleBar = true;
@@ -104,6 +113,8 @@ public sealed partial class SettingsWindow : Window
     {
         _appWindow.Show(true);
         Activate();
+        // 置顶到最上层：确保盖住同为置顶的启动器窗口（需求）
+        Win32Helper.BringToTopMost(_hWnd);
     }
 
     /// <summary>构建左侧导航（需求-设置窗口2）</summary>

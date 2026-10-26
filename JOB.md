@@ -887,3 +887,70 @@ build.bat / clean.bat   双击可用的编译/清理脚本
 31. **给语言 JSON 插/删键必须复验**（第五十六轮）：插键后 `json.load` + 键集合对比 + **反向扫描"代码引用的键是否都有定义"**；本轮据此发现多加了一个没人引用的键。删键时注意别把锚点行的键值拆开（第四十九轮踩过）。
 32. **UIA 测试的中文/emoji 结果要写 UTF-8 文件再读**（第五十六轮）：控制台编码会丢字符（emoji 显示成 `??`），直接看输出会误判"乱码了"——实际数据没问题。另外用 heredoc 写含反斜杠的 C# 代码会被 shell 吞掉转义，改用 Write 工具或 python 写文件。
 33. **`KeyboardAccelerator` 会自动生成 ToolTip 并被全窗口继承**（第六十二轮实锤）：把 Ctrl+F 的 accelerator 挂在 `RootGrid` 后，鼠标停在任意按钮/分类/空白都弹 "CTRL+F"——因为系统给 RootGrid 自动挂了快捷键提示，ToolTip 又会沿视觉树向上找最近的提示拥有者。窗口级快捷键改用 `PreviewKeyDown` 即可；若必须用 accelerator，不要挂在铺满窗口的根容器上。
+
+## 最新变更（2026-10-26 第六十三轮：剪贴板性能 / 待办与随手记修复 / 加解密配置 / 网址能力 / 应用更新，版本 1.6.8）
+
+### 本轮改动
+1. **剪贴板窗口打开慢**：`ClipboardService` 增加 `DataVersion`（每次数据变化 +1）；`ClipboardWindow` 按"版本 + 分类"判断是否重建，行（`_rowCache`）和图片缩略图（`_imageCache`）都缓存复用；数据没变时打开窗口零重建、零读盘。编辑文本/外部导入删除时清对应缓存。
+2. **随手记丢失**：`NoteWindow.ToggleViaHotkey` 隐藏前执行 `SaveOnClose()`（并入内存并落盘/推送）+ 位置尺寸落盘，与关闭按钮/Esc 一致。
+3. **待办快捷添加丢失**：`AddTextBox_LostFocus` 改为"有内容就作为新任务保存"，再退出行内输入模式（回车路径已清空输入框，不会重复添加）。
+4. **Win10 图标**：`FluentGlyphs.FontFamilyName` 由常量改为动态属性（build ≥ 22000 用 Segoe Fluent Icons，否则 Segoe MDL2 Assets），所有显式指定字体的 `FontIcon`（待办操作按钮/设置卡片/菜单图标等）在 Win10 上正常显示。**未在 App 构造函数里覆盖 `SymbolThemeFontFamily` 资源——会导致启动即崩溃（见踩坑 39）**；未指定字体的 `FontIcon` 继续由 WinUI 自带的 `SymbolThemeFontFamily` 按系统版本解析。
+5. **颜色**：`TodoColors` 8 色改为色相均匀分布的 8 个色值（红/橙/黄/绿/青/蓝/紫/品红），marker 名不变（旧数据自动兼容）。
+6. **加解密配置**：新增 `Models/ToolConfigModels.cs`、`Services/CryptoConfigService.cs`（data\tools\crypto-configs.json）、`Views/Tools/CryptoConfigWindow.cs`；`CryptoToolPage` 顶部加配置下拉框（默认"不使用配置"），加密/解密按钮后加"保存为配置""管理配置"。
+7. **数据页**：`DataService.DataItems` 增加 `tools`，导出/导入增加"常用工具配置"勾选项；导入后立即 `CryptoConfigService.LoadLocal()`。
+8. **网址图标**：`FaviconService` 重写抓取流程——根 favicon（https/http/apple-touch）→ 首页 `<link>` 声明（支持相对路径、`<base href>`、SPA `#/` 路由；`ReadBlockAsync` 读满 256KB）→ 逐个尝试候选。旧实现"http favicon 连接失败就跳过解析 HTML"是部分站点没图标的根因。
+9. **网址格式/备注**：新增 `Services/LauncherItemPathKinds.cs` 统一 scheme 判断；网址支持 http/https/ftp/ftps/mailto/tel/sms 与裸域名（自动补 https://）；`TextItemDialogAsync` 增加备注输入框；`DropResolver`、`NormalizeLegacyUrlTypes`、`ItemIconService` 同步改造（非网页网址走协议图标提取）。
+10. **设置窗口置顶**：`SettingsWindow` 始终 `IsAlwaysOnTop = true`，显示时 `Win32Helper.BringToTopMost` 移到置顶层最上面。
+11. **应用更新**：新增 `Services/UpdateService.cs` + 常规设置 3 项 + 关于页检查/更新弹窗 + 托盘气泡。
+    - 渠道：GitHub 原始 / GitHub 代理（默认代理）；请求统一走 `ProxyService.CreateHttpClient`（遵循设置-常规-代理）。
+    - 代理渠道：先请求需求给的 `https://gh-proxy.org/https://api.github.com/repos/daenmax/daen-launcher/releases`，失败/限流退回直连 API、再退 Atom；下载直链统一加 `gh-proxy.org/` 前缀。
+    - 原始渠道：Atom（含更新说明）→ Releases 网页（只取 tag）→ API。
+    - 启动时静默检查：有新版本按设置"托盘提示"或"静默下载 → 覆盖自身 → 重启"。
+    - 自替换：写 `%TEMP%\DaenLauncher\update\apply-update.cmd`（等 PID 退出 → copy → start），UTF-8 无 BOM；更新前写 `data\update\pending.json`，新版本启动时版本号匹配才弹"更新完成/自动更新完成"并删除。
+    - 关于页：检查失败/已最新弹提示；有新版本弹窗展示纯文本更新记录（Markdown/HTML 提取）、进度条 + 百分比，下载完成按钮变"重启完成更新"。
+12. 版本号 → **1.6.8**；新增 `updateLog/`（1.0.0、1.5.0、1.6.3、1.6.5、1.6.6、1.6.8 中英各一份）。
+
+12.1 **更新弹窗只显示版本号没有说明（2026-10-26 用户实测 1.6.9 反馈）修复**：
+    - `Releases 网页兜底` 以前只解析 tag、body 固定为空 → 现在按"tag 之后、下一个 tag 之前"把 `class=markdown-body` 的说明块归属到对应版本；
+    - 新增 `FillMissingBodiesAsync`：比当前版本新的 release 若有空 body，用直连 Atom（10s 超时）按版本号补全（应对 gh-proxy 缓存发布早期的空 body 响应）；
+    - `BuildReleaseNotesText` 对空 body 输出"（该版本没有提供更新说明）"，不再出现只有版本号看起来像 bug 的情况；
+    - 新增 `data\update\last-check.log`：记录每次检查的渠道、实际来源（gh-proxy-api/direct-api/direct-atom/atom/releases-page/api）、每个版本的 body 长度和下载直链，排查更新问题先看它。
+    - 实测结论：gh-proxy 的 API 会间歇性限流（实测启动检查时 `source=direct-api`，即代理 API 失败后走了直连 API），但直连 API/Atom 的 body 正常，检查可用。
+    - **后续实测定论（2026-10-27 00:24）**：数据一直是对的（日志 bodyLen=520），真正让弹窗"只剩版本号"的原因是 `ShowUpdateDialogAsync` 里 `TextBox` **初始化器先赋 `Text`、后设 `AcceptsReturn`**——WinUI 在单行模式（AcceptsReturn=false）下把带换行的文本截断在第一处换行，只剩第一行 "v1.6.9"。修复：先设 `AcceptsReturn = true` 和滚动条，最后再赋 `Text`，并把换行统一成 CRLF。`TodoWindow` 的新增/编辑弹窗（内容/备注框）有同样的初始化顺序，一并调整。
+    - **2026-10-27 00:30 再修两处文本/筛选问题（用户实测反馈）**：
+      ① GitHub 原始渠道（Atom）返回的是 HTML（`<ol><li>…</li></ol>`）：旧转换直接删 `<li>` 导致序号消失，标签之间的源码换行又变成空行 → `ToPlainText` 现在先把 `>`/`<` 之间、`<br>` 后面的格式换行压掉，并把 `<ol>/<ul>` 里的 `<li>` 还原成 `1. ` / `• `；
+      ② GitHub 代理的列表可能因镜像缓存缺少当前版本（实测缺 1.6.8），旧的"找不到当前版本就显示全部 10 条"会把更老的版本也列出来 → `GetUpdatesSinceCurrent` 改为**按版本号过滤**（只显示 > 当前版本的；当前比 10 条都老时自然就是全部 10 条）。
+    - **2026-10-27 00:50 待办颜色"换了没效果"根因修复**：`TodoWindow.ColorConverter` 把 `FromArgb` 的参数顺序写错（把 R 当 A、G 当 R、B 当 G、255 当 B），所有用它的色块/颜色条都被渲染成蓝紫色系（红→蓝、橙→紫、黄→品红……）。用户看到的"还是之前那 8 个颜色"其实是这套被错位后的颜色；配置文件只存 `red/orange/...` 标记，不存色值，与此无关。修正为 `FromArgb(255, R, G, B)` 后，颜色行正确显示 红/橙/黄/绿/青/蓝/紫/粉（已截图验证）。其余 `Color.FromArgb` 调用（笔记底色、重要任务底色、主题画刷）原本就是 (A,R,G,B)，无需改。
+    - **2026-10-27 00:45 新增：静默下载进度可见（用户需求）**：`UpdateService` 增加全局下载状态 `IsDownloading / DownloadProgress / DownloadingVersion` + `DownloadStateChanged` 事件，`DownloadAsync` 内部维护（进度变化 ≥1% 才发布；总大小未知时进度为 -1，界面显示不确定进度条）。"设置-关于"的应用更新卡片增加进度条 + "正在后台下载更新 vX… N%"，页面构造时同步一次状态（下载可能先于页面打开），`Unloaded` 时解除订阅；下载期间"检查更新"按钮禁用，避免重复下载覆盖同一临时文件。
+
+### 当前进度（本轮后）
+- 已完成：上述 12 项，`dotnet build -c Debug -p:Platform=x64` 0 警告 0 错误。
+- 已验证：更新源 API/Atom 的真实返回结构与解析（代理 API 正常返回 5 个版本，assets[0]=DaenLauncher.exe；Atom 解析出版本与说明）；示例网址 `https://xn--hwt101d.cn:20100/guacamole/#/` 的 `images/logo-64.png` 相对路径可正确解析到 `/guacamole/images/logo-64.png`。
+- 未实测：GUI 交互（剪贴板缓存、待办失焦保存、配置窗口、更新弹窗/自替换/重启提示），需用户按需求逐项验收。
+
+### 待办事项（本轮后）
+- 用户实测本轮 12 项；重点：正式发版 1.6.8 后验证"检查→下载→重启"完整链路（自替换依赖 exe 所在目录可写，Program Files 下需要另行处理）。
+- 剪贴板云同步（仍未做）。
+- "左键双击桌面 / 双击任务栏"触发（仍为预留复选框）。
+- 更新渠道若长期被 GitHub API 限流，可考虑在仓库放 `version.json` 之类的稳定元数据源。
+
+### 关键决策（本轮）
+- **更新检查的仓库用 `daenmax/daen-launcher`**：需求里"GitHub 原始"写的是 `shuishuipingan/qoder2api-hub` 的 releases 页，但同一条需求给的下载直链是 `daenmax/daen-launcher`，读别的仓库会拿到无关版本、下载也会 404，故统一用本软件仓库；原始渠道用同一 API/Atom 的直连版本（不抓网页 HTML），下载直链仍按需求拼 `.../releases/download/{tag}/DaenLauncher.exe`。**2026-10-26 用户已确认**：`shuishuipingan/qoder2api-hub` 是需求笔误，正确就是 `daenmax/daen-launcher`；代理渠道拿到 `browser_download_url` 后必须再拼 `https://gh-proxy.org/` 前缀（形如 `https://gh-proxy.org/https://github.com/daenmax/daen-launcher/releases/download/1.6.6/DaenLauncher.exe`）才是真正的代理下载地址——当前 `UpdateService.WithProxyPrefix` 已按此实现且幂等。
+- **图标字体按系统版本选择**：Win10 无 Segoe Fluent Icons；`FluentGlyphs.FontFamilyName` 动态化解决了所有"显式指定字体"的图标。**不要用代码往 `Application.Resources` 里覆盖 `SymbolThemeFontFamily`**（App 构造阶段写入会以 0x8000FFFF 崩溃）；需要覆盖框架资源时必须在 XAML 里声明，或改用显式字体。
+- **配置只存"参数快照"**：加解密配置按算法分组、只支持新增/删除（需求），不保存输入输出内容；导出随 data\tools 一起走。
+
+### 踩过的坑（本轮）
+34. **gh-proxy 不等于"全站镜像"**：`releases.atom` 经 gh-proxy 返回 404；`releases` 网页经代理返回的是代理自己的 JS 挑战页（`<title>GitHub加速下载代理...`，无 tag 链接）；`releases/tag/x` 返回 403。只有 API JSON 与 release 资产下载可用 → 代理渠道的兜底只能是"直连 API / 直连 Atom"。
+35. **GitHub API 匿名限流是按出站 IP 的**：代理出口是共享 IP，会间歇性返回 `{"message":"API rate limit exceeded..."}`（HTTP 200，但根节点不是数组）。解析时必须判断 `ValueKind == Array`，且"拿不到任何版本"要按检查失败处理，不能当成"已是最新"。
+36. **`UriBuilder { Fragment = "" }` 去片段**：SPA 的 `#/` 路由对服务端无意义；相对 href 必须基于去片段后的页面地址解析（`images/x.png` + `/app/` → `/app/images/x.png`）。
+37. **批处理文件不能带 UTF-8 BOM**：`File.WriteAllText(..., Encoding.UTF8)` 会写 BOM，cmd.exe 会把第一行当非法命令；自更新脚本用 `new UTF8Encoding(false)`。另：无控制台窗口时 `timeout` 可能失败，延时改用 `ping -n 2 127.0.0.1`。
+38. **`Progress<T>` 的线程**：下载进度回调必须用 UI 线程创建的 `Progress<double>`（回调会 Post 回创建线程）；下载循环每 80KB `await` 一次即可保持界面响应。
+
+39. **在 App 构造函数里写 `Application.Resources["键"]` 会导致启动即崩溃（第六十三轮实锤）**：本轮为了兼容 Win10 的 `FontIcon` 默认字体，在 `App()` 里执行 `Resources["SymbolThemeFontFamily"] = new FontFamily(...)`，结果进程能起来但**没有任何窗口**，几秒后崩溃退出（任务管理器里进程反复出现又消失），Windows 事件日志为 `Microsoft.UI.Xaml.dll` / `0xc000027b`（stowed exception），WER 里 `combase.dll 0x8000ffff`。关键判据：崩溃发生在 `OnLaunched` 之前，所以 `data` 目录和 `crash.log` 都不会生成（`UnhandledException` 处理器也还没挂上）。修复：删除该赋值。结论：App 启动阶段不要动态改应用资源字典；图标字体在创建 `FontIcon` 时显式指定 `FontFamily = new FontFamily(FluentGlyphs.FontFamilyName)` 是安全做法。
+
+40. **`TextBox` 的 `AcceptsReturn` 必须在赋 `Text` 之前设置（第六十三轮，用户实测"更新弹窗只有版本号"的根因）**：WinUI 的 `TextBox` 在 `AcceptsReturn=false`（默认，单行模式）时接收带换行的 `Text` 会**截断在第一处换行**，后续内容直接丢失；之后再设 `AcceptsReturn=true` 也不会恢复。对象初始化器的属性按书写顺序执行，所以 `new TextBox { Text = 多行文本, AcceptsReturn = true }` 是错的。正确写法：先 new 出空框 → 设 `AcceptsReturn = true`（以及 TextWrapping/滚动条）→ 最后赋 `Text`，并按项目约定把 `\n` 统一成 `\r\n`。`ToolKit.InputArea/OutputArea` 早已按此方式写（注释"多行属性在构造后单独设置"），但本轮的更新弹窗和待办编辑弹窗初始化器仍踩了同一个坑。
+
+41. **GitHub Releases 的 Atom `content` 是 HTML，不是 Markdown（第六十三轮）**：发布说明写的是 "1. xxx" 纯文本，Atom 里会被 GitHub 渲染成 `<ol><li>xxx</li></ol>`。做纯文本提取时：① 直接删标签会丢序号 → 要把 `<ol>` 内的 `<li>` 还原成 `1. `（`<ul>` → `• `）；② HTML 源码里 `</li>` 和 `<li>` 之间有源码换行，`<br>` 后面也有 → 不先压掉 `>\s*\n\s*<` 和 `<br>\s*\n\s*` 就会每行多一个空行。
+42. **"当前版本不在发布列表里"要按版本号过滤，不能用"返回全部"（第六十三轮）**：gh-proxy 等镜像会缓存旧 API 响应，实测列表里缺 1.6.8 但包含 1.6.9 → 旧逻辑返回全部 10 条，把 1.6.6/1.6.5 等老版本也展示出来。正确做法：`Releases.Where(v > current)`，这样"当前版本比这 10 条都老"时自然得到全部 10 条，符合原需求意图，又不会带出老版本。
+
+43. **`ColorHelper.FromArgb` / `Color.FromArgb` 的参数顺序是 (A, R, G, B)（第六十三轮实锤）**：`TodoWindow.ColorConverter` 曾经写成 `FromArgb(R, G, B, 255)`，结果红→蓝、橙→紫、黄→品红、绿→淡紫……整套调色板被"色相平移"，用户会以为"换颜色没生效/还是旧颜色"。任何 "#RRGGBB" 转 Color 的辅助方法都要写成 `FromArgb(255, r, g, b)`，并在改调色板后用截图确认小色块实际色相。

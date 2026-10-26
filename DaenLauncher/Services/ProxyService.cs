@@ -9,7 +9,7 @@ namespace DaenLauncher.Services;
 /// 使用方式：任何需要联网的代码都用 <see cref="CreateHttpClient"/> 获取 HttpClient，
 /// 不要自己 new HttpClient()——这样代理模式（不使用/系统/HTTP/SOCKS5）才能全局生效。
 /// 已接入：webnote 云同步（WebNoteClient）、必应壁纸（WallpaperService）、
-/// 网址图标（FaviconService）；检查版本更新（占位，后续完善时同样走这里）。
+/// 网址图标（FaviconService）、检查/下载应用更新（UpdateService）。
 /// 原理：SocketsHttpHandler 按代理模式构造（.NET 内置支持 socks5:// 代理），
 /// 共享同一个 handler 复用连接池；代理配置变化后自动换新 handler，立即生效无需重启。
 /// </summary>

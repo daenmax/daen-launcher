@@ -38,6 +38,12 @@ public static class DataPathService
     /// <summary>剪贴板数据目录 data\clipboard</summary>
     public static string ClipboardDir => Path.Combine(DataRoot, "clipboard");
 
+    /// <summary>常用工具数据目录 data\tools（加解密配置等）</summary>
+    public static string ToolsDir => Path.Combine(DataRoot, "tools");
+
+    /// <summary>应用更新目录 data\update（更新结果标记、下载的临时文件）</summary>
+    public static string UpdateDir => Path.Combine(DataRoot, "update");
+
     /// <summary>必应壁纸数据目录 data\wallpaper（需求）</summary>
     public static string WallpaperDir => Path.Combine(DataRoot, "wallpaper");
 
@@ -80,7 +86,7 @@ public static class DataPathService
         foreach (var dir in new[]
                  {
                      ConfigDir, LanguageDir, IconSystemDir, IconCacheDir,
-                     LauncherDir, TodoDir, NoteDir, ClipboardDir,
+                     LauncherDir, TodoDir, NoteDir, ClipboardDir, ToolsDir, UpdateDir,
                      WallpaperDir, WallpaperCacheDir, WallpaperImageDir
                  })
         {

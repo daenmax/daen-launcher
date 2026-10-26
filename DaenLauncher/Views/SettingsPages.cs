@@ -18,7 +18,68 @@ public sealed class GeneralPage : SettingsPageBase
         BuildAutoStartCard();
         BuildStartBehaviorCard();
         BuildProxyCard();
+        BuildUpdateCard();
         BuildAuxiliaryCard();
+    }
+
+    /// <summary>
+    /// 应用更新卡片（需求-常规）：
+    /// 自动检查版本更新（默认勾选）、自动下载更新（默认不勾选）、更新渠道（默认 GitHub 代理）。
+    /// </summary>
+    private void BuildUpdateCard()
+    {
+        var content = new StackPanel { Spacing = 8 };
+
+        var autoCheck = new CheckBox
+        {
+            Content = LocalizationService.Tr("Settings.Update.AutoCheck"),
+            IsChecked = _settings.AutoCheckUpdate
+        };
+        autoCheck.Checked += (_, _) => { _settings.AutoCheckUpdate = true; SettingsService.Instance.Save(); };
+        autoCheck.Unchecked += (_, _) => { _settings.AutoCheckUpdate = false; SettingsService.Instance.Save(); };
+        content.Children.Add(autoCheck);
+
+        var autoDownload = new CheckBox
+        {
+            Content = LocalizationService.Tr("Settings.Update.AutoDownload"),
+            IsChecked = _settings.AutoDownloadUpdate
+        };
+        autoDownload.Checked += (_, _) => { _settings.AutoDownloadUpdate = true; SettingsService.Instance.Save(); };
+        autoDownload.Unchecked += (_, _) => { _settings.AutoDownloadUpdate = false; SettingsService.Instance.Save(); };
+        content.Children.Add(autoDownload);
+
+        var channelRow = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 12,
+            Margin = new Thickness(0, 4, 0, 0)
+        };
+        channelRow.Children.Add(new TextBlock
+        {
+            Text = LocalizationService.Tr("Settings.Update.Channel"),
+            VerticalAlignment = VerticalAlignment.Center
+        });
+        var channelCombo = new ComboBox
+        {
+            MinWidth = 200,
+            ItemsSource = new[]
+            {
+                LocalizationService.Tr("Settings.Update.Channel.Raw"),
+                LocalizationService.Tr("Settings.Update.Channel.Proxy")
+            },
+            SelectedIndex = _settings.UpdateChannel == UpdateChannel.GitHubRaw ? 0 : 1
+        };
+        channelCombo.SelectionChanged += (_, _) =>
+        {
+            _settings.UpdateChannel = channelCombo.SelectedIndex == 0
+                ? UpdateChannel.GitHubRaw
+                : UpdateChannel.GitHubProxy;
+            SettingsService.Instance.Save();
+        };
+        channelRow.Children.Add(channelCombo);
+        content.Children.Add(channelRow);
+
+        MakeCard(FluentGlyphs.Sync, "Settings.Update", "Settings.Update.Sub", content);
     }
 
     /// <summary>附属功能卡片（需求）：勾选显示在启动器左下角的功能（最多 3 个），
@@ -557,6 +618,7 @@ public sealed class DataPage : SettingsPageBase
     private readonly CheckBox _exportNote = new();
     private readonly CheckBox _exportClipboard = new();
     private readonly CheckBox _exportWallpaper = new();
+    private readonly CheckBox _exportTools = new();
 
     public DataPage()
     {
@@ -606,9 +668,9 @@ public sealed class DataPage : SettingsPageBase
         }
     }
 
-    /// <summary>导出/删除勾选框行（两项共用同一布局）</summary>
+    /// <summary>导出/删除勾选框行（两项共用同一布局；tools 只在导出时传入）</summary>
     private StackPanel BuildCheckRow(CheckBox config, CheckBox launcher, CheckBox todo,
-        CheckBox note, CheckBox clipboard, CheckBox wallpaper)
+        CheckBox note, CheckBox clipboard, CheckBox wallpaper, CheckBox? tools = null)
     {
         var stack = new StackPanel { Spacing = 4 };
         stack.Children.Add(config);
@@ -617,6 +679,7 @@ public sealed class DataPage : SettingsPageBase
         stack.Children.Add(note);
         stack.Children.Add(clipboard);
         stack.Children.Add(wallpaper);
+        if (tools != null) stack.Children.Add(tools);
         return stack;
     }
 
@@ -629,6 +692,7 @@ public sealed class DataPage : SettingsPageBase
         _exportNote.Content = loc.T("Data.Item.Note");
         _exportClipboard.Content = loc.T("Data.Item.Clipboard");
         _exportWallpaper.Content = loc.T("Data.Item.Wallpaper");
+        _exportTools.Content = loc.T("Data.Item.Tools");
         _exportConfig.IsChecked = true;
         _exportLauncher.IsChecked = true;
     }
@@ -639,7 +703,7 @@ public sealed class DataPage : SettingsPageBase
         exportButton.Click += async (_, _) => await ExportAsync();
 
         var content = new StackPanel { Spacing = 4 };
-        content.Children.Add(BuildCheckRow(_exportConfig, _exportLauncher, _exportTodo, _exportNote, _exportClipboard, _exportWallpaper));
+        content.Children.Add(BuildCheckRow(_exportConfig, _exportLauncher, _exportTodo, _exportNote, _exportClipboard, _exportWallpaper, _exportTools));
         content.Children.Add(exportButton);
         MakeCard(FluentGlyphs.Save, "Data.Export", "Data.Export.Sub", content);
     }
@@ -648,7 +712,8 @@ public sealed class DataPage : SettingsPageBase
     {
         var keys = CollectChecked(
             (_exportConfig, "config"), (_exportLauncher, "launcher"), (_exportTodo, "todo"),
-            (_exportNote, "note"), (_exportClipboard, "clipboard"), (_exportWallpaper, "wallpaper"));
+            (_exportNote, "note"), (_exportClipboard, "clipboard"), (_exportWallpaper, "wallpaper"),
+            (_exportTools, "tools"));
         if (keys.Count == 0)
         {
             await ShowInfo(LocalizationService.Tr("Data.NoSelection"));
@@ -709,7 +774,8 @@ public sealed class DataPage : SettingsPageBase
             ["todo"] = new() { Content = loc.T("Data.Item.Todo"), IsEnabled = available.Contains("todo") },
             ["note"] = new() { Content = loc.T("Data.Item.Note"), IsEnabled = available.Contains("note") },
             ["clipboard"] = new() { Content = loc.T("Data.Item.Clipboard"), IsEnabled = available.Contains("clipboard") },
-            ["wallpaper"] = new() { Content = loc.T("Data.Item.Wallpaper"), IsEnabled = available.Contains("wallpaper") }
+            ["wallpaper"] = new() { Content = loc.T("Data.Item.Wallpaper"), IsEnabled = available.Contains("wallpaper") },
+            ["tools"] = new() { Content = loc.T("Data.Item.Tools"), IsEnabled = available.Contains("tools") }
         };
         foreach (var box in boxes.Values)
         {
@@ -736,6 +802,11 @@ public sealed class DataPage : SettingsPageBase
         try
         {
             DataService.Import(file.Path, selected);
+            // 常用工具配置：立即从磁盘重读，即使选择"稍后重启"也能马上用上
+            if (selected.Contains("tools"))
+            {
+                CryptoConfigService.Instance.LoadLocal();
+            }
             await ShowInfo(LocalizationService.Tr("Data.Import.Done"));
             SettingsActions.PromptRestart(Content.XamlRoot);
         }
@@ -3024,10 +3095,240 @@ public sealed class AboutPage : SettingsPageBase
         MakeCard(FluentGlyphs.Code, "About.OpenSourceCard", "About.OpenSourceCard.Sub", button);
     }
 
+    /// <summary>
+    /// 应用更新卡片（需求）：显示当前版本 + "检查更新"按钮 + 下载进度。
+    /// 检查失败/已是最新都会弹提示；有新版本则弹窗展示更新内容，
+    /// 并提供"暂不更新 / 立即更新"，下载时显示进度条和百分比，
+    /// 下载完成后按钮变为"重启完成更新"。
+    /// 另外：启动时"自动下载更新"是静默的，这里订阅全局下载状态，
+    /// 打开关于页就能看到后台下载的实时进度（需求）。
+    /// </summary>
     private void BuildUpdateCard()
     {
-        var text = new TextBlock { Text = LocalizationService.Tr("About.Update.Developing"), Opacity = 0.7 };
-        MakeCard(FluentGlyphs.Sync, "About.Update", "About.Update.Sub", text);
+        var loc = LocalizationService.Instance;
+        var content = new StackPanel { Spacing = 8 };
+        content.Children.Add(new TextBlock
+        {
+            Text = string.Format(loc.T("About.Update.Current"), "v" + AppInfoService.Version),
+            Opacity = 0.8
+        });
+
+        var checkButton = new Button { Content = loc.T("About.Update.Check") };
+        checkButton.Click += async (_, _) => await CheckUpdateAsync(checkButton);
+        content.Children.Add(checkButton);
+
+        // ===== 后台下载进度（静默下载时也能看到）=====
+        var downloadText = new TextBlock { FontSize = 12, Opacity = 0.8, TextWrapping = TextWrapping.Wrap };
+        var downloadBar = new ProgressBar { Minimum = 0, Maximum = 1, Value = 0 };
+        var downloadPanel = new StackPanel { Spacing = 6, Visibility = Visibility.Collapsed };
+        downloadPanel.Children.Add(downloadText);
+        downloadPanel.Children.Add(downloadBar);
+        content.Children.Add(downloadPanel);
+
+        // 按全局下载状态刷新界面（下载中 = 显示进度条 + 禁用检查按钮）
+        void ApplyDownloadState()
+        {
+            var service = UpdateService.Instance;
+            checkButton.IsEnabled = !service.IsDownloading;
+            if (!service.IsDownloading)
+            {
+                downloadPanel.Visibility = Visibility.Collapsed;
+                return;
+            }
+
+            downloadPanel.Visibility = Visibility.Visible;
+            var version = service.DownloadingVersion;
+            if (version.Length > 0 && !version.StartsWith('v') && !version.StartsWith('V'))
+            {
+                version = "v" + version;
+            }
+
+            if (service.DownloadProgress >= 0)
+            {
+                downloadBar.IsIndeterminate = false;
+                downloadBar.Value = Math.Clamp(service.DownloadProgress, 0, 1);
+                downloadText.Text = string.Format(loc.T("About.Update.BackgroundDownloading"),
+                    version, (int)Math.Round(service.DownloadProgress * 100));
+            }
+            else
+            {
+                // 总大小未知：不确定进度条
+                downloadBar.IsIndeterminate = true;
+                downloadText.Text = string.Format(loc.T("About.Update.BackgroundDownloadingUnknown"), version);
+            }
+        }
+
+        void OnDownloadStateChanged() => App.Instance.UiDispatcherQueueSafe(ApplyDownloadState);
+
+        UpdateService.Instance.DownloadStateChanged += OnDownloadStateChanged;
+        // 页面被导航走时解除订阅，避免旧页面实例被事件长期持有
+        Unloaded += (_, _) => UpdateService.Instance.DownloadStateChanged -= OnDownloadStateChanged;
+        // 打开页面时同步一次（下载可能在本页创建之前就已经开始了）
+        ApplyDownloadState();
+
+        MakeCard(FluentGlyphs.Sync, "About.Update", "About.Update.Sub", content);
+    }
+
+    /// <summary>"检查更新"按钮：检查 → 按结果弹提示或更新弹窗</summary>
+    private async Task CheckUpdateAsync(Button button)
+    {
+        var loc = LocalizationService.Instance;
+        // 正在下载时不允许再发起一次检查（避免重复下载同一个临时文件）
+        if (UpdateService.Instance.IsDownloading) return;
+
+        button.IsEnabled = false;
+        var originalText = button.Content;
+        button.Content = loc.T("About.Update.Checking");
+        UpdateCheckResult result;
+        try
+        {
+            result = await UpdateService.Instance.CheckAsync();
+        }
+        finally
+        {
+            button.IsEnabled = !UpdateService.Instance.IsDownloading;
+            button.Content = originalText;
+        }
+
+        if (!result.Success)
+        {
+            await ShowInfoAsync(string.Format(loc.T("About.Update.Failed"), result.ErrorMessage ?? ""));
+            return;
+        }
+        if (!result.HasUpdate || result.Latest == null)
+        {
+            await ShowInfoAsync(loc.T("About.Update.Latest"));
+            return;
+        }
+        await ShowUpdateDialogAsync(result);
+    }
+
+    /// <summary>更新弹窗：版本更新内容 + 下载进度 + 立即更新/重启完成更新</summary>
+    private async Task ShowUpdateDialogAsync(UpdateCheckResult result)
+    {
+        var loc = LocalizationService.Instance;
+        var latest = result.Latest!;
+
+        // 更新说明只展示纯文本（需求：富文本/markdown 提取为纯文本）
+        var notes = UpdateService.BuildReleaseNotesText(result);
+        // 注意：多行属性必须在赋 Text 之前设置！否则 WinUI 会在第一个换行处截断文本，
+        // 表现就是弹窗里只剩第一行版本号（本轮踩坑）。文本也统一成 CRLF（WinUI TextBox 的换行约定）。
+        var notesBox = new TextBox
+        {
+            IsReadOnly = true,
+            TextWrapping = TextWrapping.Wrap,
+            IsSpellCheckEnabled = false,
+            Height = 320
+        };
+        notesBox.AcceptsReturn = true;
+        notesBox.SetValue(ScrollViewer.VerticalScrollBarVisibilityProperty, ScrollBarVisibility.Auto);
+        var notesText = notes.Length > 0 ? notes : loc.T("About.Update.NoNotes");
+        notesBox.Text = notesText.Replace("\r\n", "\n").Replace('\r', '\n').Replace("\n", "\r\n");
+
+        var progress = new ProgressBar
+        {
+            Minimum = 0,
+            Maximum = 1,
+            Value = 0,
+            Visibility = Visibility.Collapsed
+        };
+        var statusText = new TextBlock { FontSize = 12, Opacity = 0.75, Visibility = Visibility.Collapsed };
+
+        var content = new StackPanel { Spacing = 10 };
+        content.Children.Add(notesBox);
+        content.Children.Add(progress);
+        content.Children.Add(statusText);
+
+        var dialog = new ContentDialog
+        {
+            XamlRoot = Content.XamlRoot,
+            Title = string.Format(loc.T("About.Update.FoundTitle"),
+                latest.Tag.StartsWith('v') || latest.Tag.StartsWith('V') ? latest.Tag : "v" + latest.Tag),
+            Content = content,
+            PrimaryButtonText = loc.T("About.Update.UpdateNow"),
+            CloseButtonText = loc.T("About.Update.Later"),
+            DefaultButton = ContentDialogButton.Primary
+        };
+
+        // 下载状态：downloading = 正在下载；downloaded = 已下载完成（按钮变成"重启完成更新"）
+        var downloading = false;
+        var downloaded = false;
+        string? downloadedPath = null;
+
+        dialog.PrimaryButtonClick += async (_, args) =>
+        {
+            // 已下载完成：这一下点击 = 替换自身并重启
+            if (downloaded && downloadedPath != null)
+            {
+                try
+                {
+                    UpdateService.Instance.ApplyAndRestart(downloadedPath, UpdateApplyKind.Manual, latest);
+                }
+                catch (Exception ex)
+                {
+                    statusText.Text = string.Format(loc.T("About.Update.ApplyFailed"), ex.Message);
+                    statusText.Visibility = Visibility.Visible;
+                }
+                return;
+            }
+
+            // 还没下载：保持弹窗打开，开始下载并显示进度
+            args.Cancel = true;
+            if (downloading) return;
+            downloading = true;
+
+            progress.Visibility = Visibility.Visible;
+            statusText.Visibility = Visibility.Visible;
+            statusText.Text = string.Format(loc.T("About.Update.Downloading"), 0);
+            dialog.IsPrimaryButtonEnabled = false;
+
+            try
+            {
+                var reporter = new Progress<double>(value =>
+                {
+                    if (value < 0) return;
+                    progress.Value = Math.Clamp(value, 0, 1);
+                    statusText.Text = string.Format(loc.T("About.Update.Downloading"),
+                        (int)Math.Round(value * 100));
+                });
+                downloadedPath = await UpdateService.Instance.DownloadAsync(
+                    latest.DownloadUrl, reporter, CancellationToken.None, latest.VersionText);
+
+                progress.Value = 1;
+                downloaded = true;
+                statusText.Text = loc.T("About.Update.Downloaded");
+                dialog.PrimaryButtonText = loc.T("About.Update.RestartNow");
+            }
+            catch (Exception ex)
+            {
+                statusText.Text = string.Format(loc.T("About.Update.DownloadFailed"), ex.Message);
+            }
+            finally
+            {
+                downloading = false;
+                // 失败时允许再次点击"立即更新"重试
+                if (!downloaded)
+                {
+                    dialog.PrimaryButtonText = loc.T("About.Update.UpdateNow");
+                }
+                dialog.IsPrimaryButtonEnabled = true;
+            }
+        };
+
+        await dialog.ShowAsync();
+    }
+
+    /// <summary>信息弹窗</summary>
+    private async Task ShowInfoAsync(string message)
+    {
+        var dialog = new ContentDialog
+        {
+            XamlRoot = Content.XamlRoot,
+            Content = message,
+            CloseButtonText = LocalizationService.Tr("Dialog.Ok"),
+            DefaultButton = ContentDialogButton.Close
+        };
+        await dialog.ShowAsync();
     }
 
     private void BuildContactCard()

@@ -86,9 +86,9 @@ public sealed class LauncherDataService
             {
                 foreach (var item in sub.Items)
                 {
+                    // 仍按"网址"处理的项目：http/https/ftp/mailto/tel/sms 等（见 LauncherItemPathKinds）
                     if (item.Type == LauncherItemType.Url &&
-                        !item.Path.StartsWith("http://", StringComparison.OrdinalIgnoreCase) &&
-                        !item.Path.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+                        !LauncherItemPathKinds.IsUrlLike(item.Path))
                     {
                         item.Type = LauncherItemType.Protocol;
                         changed = true;

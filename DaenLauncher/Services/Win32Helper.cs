@@ -51,6 +51,28 @@ public static class Win32Helper
     public static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter,
         int x, int y, int cx, int cy, uint uFlags);
 
+    // SetWindowPos 常量（"置顶到最上层"用）
+    /// <summary>不改变窗口大小</summary>
+    public const int SWP_NOSIZE = 0x0001;
+
+    /// <summary>不改变窗口位置</summary>
+    public const int SWP_NOMOVE = 0x0002;
+
+    /// <summary>不激活窗口</summary>
+    public const int SWP_NOACTIVATE = 0x0010;
+
+    /// <summary>HWND_TOPMOST 句柄值（-1）</summary>
+    public static readonly IntPtr HWND_TOPMOST = new(-1);
+
+    /// <summary>
+    /// 把窗口放到"置顶层"的最上面（比同为置顶的启动器窗口更上层）。
+    /// 设置窗口用：保证它始终盖在启动器上面（需求）。
+    /// </summary>
+    public static void BringToTopMost(IntPtr hWnd)
+    {
+        SetWindowPos(hWnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    }
+
     [DllImport("comctl32.dll", SetLastError = true)]
     private static extern bool SetWindowSubclass(IntPtr hWnd, SUBCLASSPROC pfnSubclass,
         uint uIdSubclass, nuint dwRefData);

@@ -110,13 +110,34 @@ public class SettingsPageBase : UserControl, ILocalizable
 }
 
 /// <summary>
-/// Segoe Fluent Icons 常用字形常量（设置卡片图标用）。
+/// 图标字体常量与字形（设置卡片图标、窗口内的小图标按钮用）。
+/// 兼容性：Windows 11 自带 "Segoe Fluent Icons"，Windows 10 只有 "Segoe MDL2 Assets"，
+/// 字体名必须按系统版本动态选择，否则 Win10 上指定 Fluent 字体的图标会完全不显示
+/// （需求：待办"标为重要/删除"图标在 Windows 10 上无法显示）。
+/// 本类里用到的字形都是两个字体都有的（MDL2 时代就有）。
 /// 字形对照表：https://learn.microsoft.com/windows/apps/design/style/segoe-fluent-icons-font
 /// </summary>
 public static class FluentGlyphs
 {
-    /// <summary>Fluent 图标字体名</summary>
-    public const string FontFamilyName = "Segoe Fluent Icons";
+    /// <summary>Windows 11 图标字体名</summary>
+    private const string Windows11FontFamilyName = "Segoe Fluent Icons";
+
+    /// <summary>Windows 10 图标字体名（Win10 没有 Segoe Fluent Icons）</summary>
+    private const string Windows10FontFamilyName = "Segoe MDL2 Assets";
+
+    /// <summary>Windows 11 起始内部版本号（22000 = Windows 11 21H2）</summary>
+    private const int Windows11MinBuild = 22000;
+
+    private static string? _fontFamilyName;
+
+    /// <summary>
+    /// 当前系统应使用的图标字体名（进程内只判断一次）。
+    /// 用 Environment.OSVersion（app.manifest 已声明 Windows 10 兼容性，版本号准确）。
+    /// </summary>
+    public static string FontFamilyName => _fontFamilyName ??=
+        Environment.OSVersion.Version.Build >= Windows11MinBuild
+            ? Windows11FontFamilyName
+            : Windows10FontFamilyName;
 
     public const string Globe = "\uE774";        // 球形：语言/网址
     public const string PowerButton = "\uE7E8";  // 电源：开机自启

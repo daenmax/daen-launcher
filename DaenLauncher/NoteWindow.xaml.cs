@@ -176,6 +176,12 @@ public sealed partial class NoteWindow : Window
     {
         if (AppWindow.IsVisible)
         {
+            // 与关闭按钮 / Esc 一致：隐藏前先把编辑中的标题/正文并入内存并落盘（或推送云端），
+            // 否则用快捷键隐藏时未点"保存"的修改会随窗口隐藏而丢失（需求修复）
+            _saveTextTimer.Stop();
+            SaveOnClose();
+            SavePositionNow();
+            SaveSizeNow();
             AppWindow.Hide();
         }
         else

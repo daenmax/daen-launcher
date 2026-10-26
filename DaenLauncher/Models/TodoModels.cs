@@ -16,23 +16,28 @@ public static class TodoColors
     public const string Teal = "teal";
     public const string Pink = "pink";
 
-    /// <summary>支持的全部颜色标记（按界面显示顺序）</summary>
+    /// <summary>支持的全部颜色标记（按界面显示顺序 = 色相从红到粉，相邻颜色区分度更高）</summary>
     public static readonly string[] All =
     [
-        Red, Orange, Yellow, Green, Blue, Purple, Teal, Pink
+        Red, Orange, Yellow, Green, Teal, Blue, Purple, Pink
     ];
 
-    /// <summary>颜色标记对应的显示色值（十六进制，参考 DeskBox）</summary>
+    /// <summary>
+    /// 颜色标记对应的显示色值（十六进制）。
+    /// 需求：8 个颜色辨识度要高、彼此区分度也要高——这里取 8 个色相均匀分布、
+    /// 明度/饱和度接近的色值（依次约 红/橙/黄/绿/青/蓝/紫/品红），
+    /// 深浅色主题下都能看清，也不会两两撞色。
+    /// </summary>
     public static string GetHex(string? marker) => marker switch
     {
-        Red => "#E34D4D",
-        Orange => "#F08A3C",
-        Yellow => "#F2C94C",
-        Green => "#4CAF6D",
-        Blue => "#4D8FE3",
-        Purple => "#9B6BE8",
-        Teal => "#2DB7A3",
-        Pink => "#E66AA2",
+        Red => "#E5484D",     // 红
+        Orange => "#F76B15",  // 橙
+        Yellow => "#F5C13C",  // 黄
+        Green => "#2FA85F",   // 绿
+        Teal => "#12A5B8",    // 青
+        Blue => "#3E63DD",    // 蓝
+        Purple => "#8E4EC6",  // 紫
+        Pink => "#D6409F",    // 品红
         _ => "#8A8F98"
     };
 

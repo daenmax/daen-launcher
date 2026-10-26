@@ -39,6 +39,17 @@ public sealed class AppSettings
     /// <summary>软件启动后：显示 或 隐藏</summary>
     public StartBehavior StartBehavior { get; set; } = StartBehavior.Show;
 
+    // ===== 常规：应用更新 =====
+
+    /// <summary>启动时静默检查新版本（默认勾选，需求）</summary>
+    public bool AutoCheckUpdate { get; set; } = true;
+
+    /// <summary>发现新版本后静默下载并自动替换重启（默认不勾选，需求）</summary>
+    public bool AutoDownloadUpdate { get; set; } = false;
+
+    /// <summary>更新渠道：GitHub 原始 / GitHub 代理（默认代理，需求）</summary>
+    public UpdateChannel UpdateChannel { get; set; } = UpdateChannel.GitHubProxy;
+
     /// <summary>
     /// 启动器左下角显示的附属功能（有序 id 列表，最多 3 个，需求）。
     /// 不在列表里的附属功能通过底栏"更多"菜单访问。

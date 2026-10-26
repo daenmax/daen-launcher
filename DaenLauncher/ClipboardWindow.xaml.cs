@@ -42,6 +42,22 @@ public sealed partial class ClipboardWindow : Window
     /// <summary>分类按钮（页 -> 按钮），用于更新选中态</summary>
     private readonly Dictionary<ClipboardViewTab, Button> _tabButtons = new();
 
+    // ===== 列表缓存（需求：数据多时每次打开窗口都很慢）=====
+    // 原因：旧实现每次显示都重建全部行，并重新从磁盘解码每张图片。
+    // 现在按"数据版本 + 分类"判断是否需要重建，行和缩略图都缓存复用。
+
+    /// <summary>已构建的行缓存（key = 分类|条目Id），数据没变时直接复用</summary>
+    private readonly Dictionary<string, Border> _rowCache = new();
+
+    /// <summary>图片缩略图缓存（图片完整路径 -> 已解码的位图），避免反复读盘解码</summary>
+    private readonly Dictionary<string, BitmapImage> _imageCache = new();
+
+    /// <summary>上次渲染时的数据版本（-1 = 还没渲染过）</summary>
+    private int _renderedVersion = -1;
+
+    /// <summary>上次渲染时的分类</summary>
+    private ClipboardViewTab _renderedTab = ClipboardViewTab.Records;
+
     public ClipboardWindow()
     {
         InitializeComponent();
@@ -170,7 +186,13 @@ public sealed partial class ClipboardWindow : Window
     }
 
     /// <summary>外部变化（数据删除等）后刷新视图</summary>
-    public void RefreshView() => RefreshList();
+    public void RefreshView()
+    {
+        // 数据被整体删除/导入：缓存里的行和图片都不再可靠，全部丢弃后强制重建
+        _rowCache.Clear();
+        _imageCache.Clear();
+        RefreshList(force: true);
+    }
 
     /// <summary>后台捕获到新数据时刷新列表（窗口可见时才刷新，避免无谓重建）</summary>
     private void OnClipboardDataChanged()
@@ -272,7 +294,9 @@ public sealed partial class ClipboardWindow : Window
             button.Content = new TextBlock { Text = loc.T(TabTextKey(tab)) };
         }
         UpdateTabVisuals();
-        RefreshList();
+        // 行里的右键菜单文字也带本地化，语言变了要重建行
+        _rowCache.Clear();
+        RefreshList(force: true);
     }
 
     #endregion
@@ -343,10 +367,22 @@ public sealed partial class ClipboardWindow : Window
         _currentTab == ClipboardViewTab.Records ? _clipboard.Data.Items : _clipboard.Data.Archives;
 
     /// <summary>重建列表（数据变化/切换分类后调用）</summary>
-    private void RefreshList()
+    /// <param name="force">true = 忽略缓存强制重建（语言切换/外部数据变化）</param>
+    private void RefreshList(bool force = false)
     {
-        ListPanel.Children.Clear();
         var entries = GetCurrentEntries();
+
+        // 数据版本和分类都没变：界面还是最新的，直接复用（这是"打开窗口慢"的主要优化点）
+        if (!force && _renderedVersion == _clipboard.DataVersion && _renderedTab == _currentTab)
+        {
+            UpdateFooter(entries);
+            return;
+        }
+
+        _renderedVersion = _clipboard.DataVersion;
+        _renderedTab = _currentTab;
+        PruneRowCache();
+        ListPanel.Children.Clear();
 
         if (entries.Count == 0)
         {
@@ -363,11 +399,54 @@ public sealed partial class ClipboardWindow : Window
         {
             foreach (var entry in entries)
             {
-                ListPanel.Children.Add(BuildEntryRow(entry));
+                // 同一个条目在同一分类下只构建一次，之后一直复用
+                var key = CacheKey(entry);
+                if (!_rowCache.TryGetValue(key, out var row))
+                {
+                    row = BuildEntryRow(entry);
+                    _rowCache[key] = row;
+                }
+                ListPanel.Children.Add(row);
             }
         }
 
-        // 底部统计 + 清除按钮文字/状态（随分类切换，需求）
+        UpdateFooter(entries);
+    }
+
+    /// <summary>行缓存 key（分类 + 条目 Id：同一条目在记录/归档下的右键菜单不同）</summary>
+    private string CacheKey(ClipboardEntry entry) => _currentTab + "|" + entry.Id;
+
+    /// <summary>丢弃已不在数据里的行缓存（避免删条目后缓存无限增长）</summary>
+    private void PruneRowCache()
+    {
+        var alive = _clipboard.Data.Items.Concat(_clipboard.Data.Archives)
+            .Select(e => e.Id)
+            .ToHashSet(StringComparer.Ordinal);
+        foreach (var key in _rowCache.Keys.ToList())
+        {
+            var id = key[(key.IndexOf('|') + 1)..];
+            if (!alive.Contains(id))
+            {
+                _rowCache.Remove(key);
+            }
+        }
+        // 图片缓存同理：只保留仍被引用的图片文件
+        var aliveImages = _clipboard.Data.Items.Concat(_clipboard.Data.Archives)
+            .Where(e => e.Kind == ClipboardEntryKind.Image && !string.IsNullOrEmpty(e.ImagePath))
+            .Select(e => Path.Combine(DataPathService.ClipboardDir, e.ImagePath))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (var path in _imageCache.Keys.ToList())
+        {
+            if (!aliveImages.Contains(path))
+            {
+                _imageCache.Remove(path);
+            }
+        }
+    }
+
+    /// <summary>底部统计 + 清除按钮状态（随分类切换，需求）</summary>
+    private void UpdateFooter(List<ClipboardEntry> entries)
+    {
         CountText.Text = string.Format(
             LocalizationService.Tr(_currentTab == ClipboardViewTab.Records
                 ? "Clipboard.ItemsCount" : "Clipboard.ArchiveCount"),
@@ -513,10 +592,12 @@ public sealed partial class ClipboardWindow : Window
                 HorizontalAlignment = HorizontalAlignment.Left,
                 Stretch = Stretch.Uniform
             };
-            // DecodePixelHeight 限制解码尺寸，大图不会占爆内存
-            var bitmap = new BitmapImage();
-            bitmap.DecodePixelHeight = 192;
-            bitmap.UriSource = new Uri(fullPath);
+            // 缩略图按路径缓存：列表重建/窗口反复打开时不再重新读盘解码（DecodePixelHeight 限制解码尺寸）
+            if (!_imageCache.TryGetValue(fullPath, out var bitmap))
+            {
+                bitmap = new BitmapImage { DecodePixelHeight = 192, UriSource = new Uri(fullPath) };
+                _imageCache[fullPath] = bitmap;
+            }
             image.Source = bitmap;
             imageBorder.Child = image;
             panel.Children.Add(imageBorder);
@@ -673,6 +754,9 @@ public sealed partial class ClipboardWindow : Window
         var newText = textBox.Text;
         if (newText.Length > 0)
         {
+            // 内容变了：丢掉该条目在两种分类下的行缓存，下次刷新按新内容重建
+            _rowCache.Remove(ClipboardViewTab.Records + "|" + entry.Id);
+            _rowCache.Remove(ClipboardViewTab.Archives + "|" + entry.Id);
             _clipboard.UpdateText(entry, newText);
         }
     }
