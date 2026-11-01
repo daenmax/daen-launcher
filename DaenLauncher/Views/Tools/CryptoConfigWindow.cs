@@ -27,12 +27,14 @@ public sealed class CryptoConfigWindow : Window
     private readonly Action? _onConfigsChanged;
     private readonly StackPanel _list = new() { Spacing = 6 };
     private readonly TextBlock _emptyText;
+    private readonly Grid _root;
 
     /// <summary>删除按钮字号（列表行的小图标按钮）</summary>
     private const int DeleteIconSize = 14;
 
     public CryptoConfigWindow(Action? onConfigsChanged = null)
-    {        _onConfigsChanged = onConfigsChanged;
+    {
+        _onConfigsChanged = onConfigsChanged;
         _current = this;
 
         var loc = LocalizationService.Instance;
@@ -72,26 +74,79 @@ public sealed class CryptoConfigWindow : Window
         };
         layout.Children.Add(scroll);
 
-        var root = new Grid { Padding = new Thickness(20) };
-        root.Children.Add(layout);
-        Content = root;
+        // ===== 自绘标题栏（与其他窗口一致：48px 标题栏 + 应用图标 + 标题文字）=====
+        // 系统的最小化/最大化/关闭按钮仍叠在右上角，但配色由我们按主题设置（见下方）。
+        _root = new Grid
+        {
+            Background = Application.Current.Resources["SolidBackgroundFillColorBaseBrush"] as Brush
+        };
+        _root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(48) });
+        _root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
 
-        AppWindow.Resize(new Windows.Graphics.SizeInt32((int)WindowWidth, (int)WindowHeight));
+        var appTitleBar = new Grid
+        {
+            Background = new SolidColorBrush(Colors.Transparent),
+            Padding = new Thickness(12, 0, 0, 0)
+        };
+        var titlePanel = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 10,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        var titleIcon = new Image { Width = 20, Height = 20 };
+        _ = LoadTitleBarIconAsync(titleIcon);
+        titlePanel.Children.Add(titleIcon);
+        titlePanel.Children.Add(new TextBlock
+        {
+            Text = Title,
+            VerticalAlignment = VerticalAlignment.Center,
+            Style = Application.Current.Resources["CaptionTextBlockStyle"] as Style
+        });
+        appTitleBar.Children.Add(titlePanel);
+        Grid.SetRow(appTitleBar, 0);
+        _root.Children.Add(appTitleBar);
 
-        // 工具窗口是置顶的，本窗口也必须置顶并放到置顶层最上面
+        var contentHost = new Grid { Padding = new Thickness(20) };
+        contentHost.Children.Add(layout);
+        Grid.SetRow(contentHost, 1);
+        _root.Children.Add(contentHost);
+
+        Content = _root;
+
+        // 把内容延伸到标题栏，并指定可拖动区域
+        ExtendsContentIntoTitleBar = true;
+        SetTitleBar(appTitleBar);
+        AppWindow.TitleBar.PreferredHeightOption = Microsoft.UI.Windowing.TitleBarHeightOption.Standard;
+
+        var hWnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
+
+        // 工具窗口是置顶的，本窗口也必须置顶并放到置顶层最上面；
+        // 同时它是"弹窗"语义：固定尺寸、只有关闭按钮（最小化/最大化没有意义）
         if (AppWindow.Presenter is OverlappedPresenter presenter)
         {
             presenter.IsAlwaysOnTop = true;
             presenter.IsResizable = false;
+            presenter.IsMinimizable = false;
+            presenter.IsMaximizable = false;
         }
 
+        // 显示位置：居中到"常用工具窗口所在的显示器"。
+        // 不显式定位时，Windows 会把新窗口默认放到它自己挑的显示器上（多显示器下可能跑到别的屏）。
+        var referenceHandle = ToolsWindow.CurrentInstance?.WindowHandle ?? hWnd;
+        WindowPositionHelper.PlaceDialogCenteredCenter(
+            AppWindow, referenceHandle, hWnd, WindowWidth, WindowHeight);
+
         // Esc 关闭（窗口本身就是弹窗语义，关闭 = 关掉自己，不需要隐藏）
-        WindowKeyHelper.EnableEscapeToHide(root, () => Close());
+        WindowKeyHelper.EnableEscapeToHide(_root, () => Close());
 
         var settings = SettingsService.Instance.Settings;
         BackdropService.Apply(this, settings.Backdrop);
-        ThemeService.Apply(root, settings.Theme);
-        ThemeService.ApplyCaptionButtonColors(AppWindow, root);
+        ThemeService.Apply(_root, settings.Theme);
+        // 自绘标题栏的按钮配色（与主窗口/设置窗口同款）。
+        // 注意：ActualTheme 要等窗口加载后才可靠，所以激活时再应用一次。
+        ThemeService.ApplyCaptionButtonColors(AppWindow, _root);
+        Activated += (_, _) => ThemeService.ApplyCaptionButtonColors(AppWindow, _root);
 
         // 关闭后释放静态引用（下次点"管理配置"会重新创建）
         Closed += (_, _) =>
@@ -100,6 +155,13 @@ public sealed class CryptoConfigWindow : Window
         };
 
         Rebuild();
+    }
+
+    /// <summary>加载标题栏左侧的应用图标（嵌入资源，和其他窗口一致）</summary>
+    private static async Task LoadTitleBarIconAsync(Image image)
+    {
+        var bitmap = await IconService.LoadEmbeddedAsync("DaenLauncher.Assets.logo.logo_64.png");
+        if (bitmap != null) image.Source = bitmap;
     }
 
     /// <summary>

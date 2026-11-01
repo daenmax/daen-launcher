@@ -920,6 +920,9 @@ build.bat / clean.bat   双击可用的编译/清理脚本
     - **2026-10-27 00:30 再修两处文本/筛选问题（用户实测反馈）**：
       ① GitHub 原始渠道（Atom）返回的是 HTML（`<ol><li>…</li></ol>`）：旧转换直接删 `<li>` 导致序号消失，标签之间的源码换行又变成空行 → `ToPlainText` 现在先把 `>`/`<` 之间、`<br>` 后面的格式换行压掉，并把 `<ol>/<ul>` 里的 `<li>` 还原成 `1. ` / `• `；
       ② GitHub 代理的列表可能因镜像缓存缺少当前版本（实测缺 1.6.8），旧的"找不到当前版本就显示全部 10 条"会把更老的版本也列出来 → `GetUpdatesSinceCurrent` 改为**按版本号过滤**（只显示 > 当前版本的；当前比 10 条都老时自然就是全部 10 条）。
+    - **2026-10-27 08:50 管理配置窗口：位置跑到副屏 + 标题栏按钮悬停变黑**：
+      ① 位置：`CryptoConfigWindow` 原来没有显式定位，交给系统默认放置，多显示器下会跑到别的屏。现在新增 `WindowPositionHelper.PlaceDialogCenteredCenter`，按"常用工具窗口所在显示器"的 DPI 居中（`ToolsWindow.CurrentInstance.WindowHandle` 作为参考窗口），并在移动后按该屏 DPI 重新 Resize；
+      ② 标题栏：该窗口原本是唯一没有 `ExtendsContentIntoTitleBar` 的窗口，却调用了给自绘标题栏准备的 `ThemeService.ApplyCaptionButtonColors`（半透明悬停色），系统标题栏下会被渲染成黑色。**最终改为和其他窗口一样的自绘标题栏**：`ExtendsContentIntoTitleBar = true` + 48px 标题栏（应用图标 + 标题文字）+ `ApplyCaptionButtonColors`，视觉统一；同时 `presenter.IsMinimizable/IsMaximizable = false`，弹窗语义只保留关闭按钮。
     - **2026-10-27 00:50 待办颜色"换了没效果"根因修复**：`TodoWindow.ColorConverter` 把 `FromArgb` 的参数顺序写错（把 R 当 A、G 当 R、B 当 G、255 当 B），所有用它的色块/颜色条都被渲染成蓝紫色系（红→蓝、橙→紫、黄→品红……）。用户看到的"还是之前那 8 个颜色"其实是这套被错位后的颜色；配置文件只存 `red/orange/...` 标记，不存色值，与此无关。修正为 `FromArgb(255, R, G, B)` 后，颜色行正确显示 红/橙/黄/绿/青/蓝/紫/粉（已截图验证）。其余 `Color.FromArgb` 调用（笔记底色、重要任务底色、主题画刷）原本就是 (A,R,G,B)，无需改。
     - **2026-10-27 00:45 新增：静默下载进度可见（用户需求）**：`UpdateService` 增加全局下载状态 `IsDownloading / DownloadProgress / DownloadingVersion` + `DownloadStateChanged` 事件，`DownloadAsync` 内部维护（进度变化 ≥1% 才发布；总大小未知时进度为 -1，界面显示不确定进度条）。"设置-关于"的应用更新卡片增加进度条 + "正在后台下载更新 vX… N%"，页面构造时同步一次状态（下载可能先于页面打开），`Unloaded` 时解除订阅；下载期间"检查更新"按钮禁用，避免重复下载覆盖同一临时文件。
 
@@ -954,3 +957,30 @@ build.bat / clean.bat   双击可用的编译/清理脚本
 42. **"当前版本不在发布列表里"要按版本号过滤，不能用"返回全部"（第六十三轮）**：gh-proxy 等镜像会缓存旧 API 响应，实测列表里缺 1.6.8 但包含 1.6.9 → 旧逻辑返回全部 10 条，把 1.6.6/1.6.5 等老版本也展示出来。正确做法：`Releases.Where(v > current)`，这样"当前版本比这 10 条都老"时自然得到全部 10 条，符合原需求意图，又不会带出老版本。
 
 43. **`ColorHelper.FromArgb` / `Color.FromArgb` 的参数顺序是 (A, R, G, B)（第六十三轮实锤）**：`TodoWindow.ColorConverter` 曾经写成 `FromArgb(R, G, B, 255)`，结果红→蓝、橙→紫、黄→品红、绿→淡紫……整套调色板被"色相平移"，用户会以为"换颜色没生效/还是旧颜色"。任何 "#RRGGBB" 转 Color 的辅助方法都要写成 `FromArgb(255, r, g, b)`，并在改调色板后用截图确认小色块实际色相。
+
+44. **新建顶层窗口必须显式定位（第六十三轮补充）**：WinUI 3 的 `Window` 不给位置时由系统默认放置，多显示器（尤其是副屏在左侧、坐标为负数）下可能出现在完全无关的屏幕上。弹窗类子窗口统一用 `WindowPositionHelper.PlaceDialogCenteredCenter(appWindow, 父窗口HWND, 自身HWND, 逻辑宽, 逻辑高)`：按父窗口所在显示器的 DPI 居中并 Resize；父窗口句柄通过 `窗口类.CurrentInstance` 获取（`ToolsWindow.CurrentInstance` 已提供）。
+45. **标题栏要么全自绘、要么全交给系统，不要混用（第六十三轮实锤）**：`ExtendsContentIntoTitleBar = true` 的窗口用 `ThemeService.ApplyCaptionButtonColors` 没问题（XAML 自己画按钮，alpha 正常）；但普通系统标题栏下，半透明 `ButtonHoverBackgroundColor` 会被 DWM 渲染成**黑色**。普通标题栏窗口不要改 `AppWindow.TitleBar.*` 颜色；要统一视觉就按其他窗口的做法 `ExtendsContentIntoTitleBar = true` + 自绘标题栏 + `ApplyCaptionButtonColors`（新建的管理配置窗口已改为这种）。不需要最小化/最大化时直接 `OverlappedPresenter.IsMinimizable/IsMaximizable = false`。
+
+## 最新变更（2026-11-01 第六十四轮：Win11菜单风格切换 + 项目"以管理员身份运行" + 启动工作目录修复，版本 1.6.9）
+
+### 本轮改动
+1. **常用工具-其他常用：新增"Win11菜单风格切换"**（`MiscTools.ContextMenuStyleTool`，注册 id `contextMenuStyle`）
+   - 原理：注册表 `HKCU\Software\Classes\CLSID\{86ca1aa0-34aa-4e8b-a509-50c905bae2a2}`——给 `InprocServer32` 子键写空默认值 = Win10 经典菜单；删除整个键 = Win11 新版菜单。
+   - 界面：说明文字 + 当前风格显示（Build 时读注册表）+ "切换后立即重启资源管理器"复选框（默认勾选）+ 两个按钮（切 Win10 / 恢复 Win11）。
+   - 重启 explorer：`Process.GetProcessesByName("explorer")` 逐个 Kill 后 `Process.Start("explorer.exe")`；失败时提示手动重启。
+2. **启动器：编辑项目弹窗新增"以管理员身份运行"复选框**（默认不勾选）
+   - `LauncherItem` 新增 `RunAsAdmin` 属性（随 json 序列化保存）；`Dialogs.ItemEditDialogAsync` 增加复选框读写。
+   - `LauncherRunner.Start` 统一生效：`if (asAdmin || item.RunAsAdmin) psi.Verb = "runas"`（右键"以管理员身份运行"仍可用，两者取或）。
+3. **修复：部分程序（如 Bongo Cat）从启动器启动报"字体没加载好"**
+   - 根因：`ProcessStartInfo` 没设工作目录，子进程的 CWD 是启动器自己的目录，程序用相对路径找 `cat.ttf` 等资源就找不到；双击运行时 CWD 是 exe 所在目录所以正常。
+   - 修复：`LauncherRunner.Start` 对 Exe/File 类型设 `psi.WorkingDirectory = 程序所在目录`；`.lnk` 由系统解析目标自带工作目录，不设。
+4. 版本号 → **1.6.9**，新增 `updateLog/1.6.9_zh_cn.md`、`1.6.9_en_us.md`；语言文件新增 `Tools.CtxMenu.*` 14 条 + `Dialog.ItemRunAsAdmin`（中英）。
+
+### 当前进度（本轮后）
+- 已完成：上述 4 项，`dotnet build -c Debug -p:Platform=x64` 0 警告 0 错误。
+- 未实测（需用户验收）：① 工具里实际切换菜单风格并确认 explorer 重启后生效；② 勾选管理员后启动弹 UAC；③ Bongo Cat 从启动器启动不再报字体错误。
+
+### 关键决策（本轮）
+- **右键菜单风格检测**：以 `InprocServer32` 子键是否存在判断当前是否 Win10 经典菜单（reg add 创建的就是这个子键）。
+- **切 Win10 用 `CreateSubKey + SetValue(null, "")`** 等效 `reg add ... /f /ve`；切回 Win11 用 `DeleteSubKeyTree` 整键删除，等效 `reg delete ... /f`。
+- **工作目录只对 Exe/File 设置**：File 类型（文档等）工作目录设为其所在目录无害；Lnk 交给系统；Uwp/Url/Protocol 无本地路径。

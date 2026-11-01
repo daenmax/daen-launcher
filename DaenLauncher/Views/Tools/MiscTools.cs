@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
@@ -437,6 +438,137 @@ internal sealed class UuidTool : IToolPage
             lines.Add(upper ? text.ToUpperInvariant() : text);
         }
         ToolKit.SetOutput(_output, ToolKit.JoinLines(lines));
+    }
+}
+
+/// <summary>
+/// Win11 菜单风格切换：通过注册表 CLSID {86ca1aa0-34aa-4e8b-a509-50c905bae2a2}
+/// 在 Win11 新版右键菜单 和 Win10 经典右键菜单 之间切换。
+/// 原理：给 HKCU\Software\Classes\CLSID\{86ca1aa0-...}\InprocServer32 写入一个空默认值
+/// 即屏蔽 Win11 新菜单改用经典菜单；删除该键则恢复 Win11 新菜单。
+/// 切换后需重启资源管理器（explorer.exe）才能生效。
+/// </summary>
+internal sealed class ContextMenuStyleTool : IToolPage
+{
+    /// <summary>控制右键菜单风格的注册表键路径（HKCU 下，无 InprocServer32 后缀）</summary>
+    private const string ClsidKeyPath = @"Software\Classes\CLSID\{86ca1aa0-34aa-4e8b-a509-50c905bae2a2}";
+
+    /// <summary>需要写入空默认值的子键名</summary>
+    private const string InprocServer32SubKey = "InprocServer32";
+
+    /// <summary>explorer 进程名（不含 .exe 后缀，Process.GetProcessesByName 的格式）</summary>
+    private const string ExplorerProcessName = "explorer";
+
+    private TextBlock _status = null!;
+    private TextBlock _result = null!;
+    private CheckBox _restartExplorer = null!;
+
+    public UIElement Build()
+    {
+        var root = ToolKit.PageRoot();
+
+        // 说明文字：讲清楚做了什么、有什么副作用
+        root.Children.Add(new TextBlock
+        {
+            Text = LocalizationService.Tr("Tools.CtxMenu.Desc"),
+            TextWrapping = TextWrapping.Wrap,
+            FontSize = 12,
+            Opacity = 0.7,
+            Margin = new Thickness(0, 0, 0, 6)
+        });
+
+        // 当前状态（Build 时读取一次注册表）
+        _status = new TextBlock { FontSize = 14, Margin = new Thickness(0, 0, 0, 6) };
+        UpdateStatus();
+        root.Children.Add(_status);
+
+        // 切换后是否立即重启资源管理器（默认勾选，不重启不生效）
+        _restartExplorer = ToolKit.Check("Tools.CtxMenu.RestartExplorer", true);
+
+        var toWin10 = ToolKit.PrimaryButton("Tools.CtxMenu.ToWin10", (_, _) => Switch(toWin10Style: true));
+        var toWin11 = ToolKit.ActionButton("Tools.CtxMenu.ToWin11", (_, _) => Switch(toWin10Style: false));
+        root.Children.Add(_restartExplorer);
+        root.Children.Add(ToolKit.ButtonRow(toWin10, toWin11));
+
+        // 结果反馈
+        _result = new TextBlock { FontSize = 12, Margin = new Thickness(0, 6, 0, 0), TextWrapping = TextWrapping.Wrap };
+        root.Children.Add(_result);
+        return root;
+    }
+
+    /// <summary>刷新顶部"当前风格"显示</summary>
+    private void UpdateStatus()
+    {
+        _status.Text = LocalizationService.Tr(IsWin10Style()
+            ? "Tools.CtxMenu.CurrentWin10"
+            : "Tools.CtxMenu.CurrentWin11");
+    }
+
+    /// <summary>检测当前是否处于 Win10 经典菜单（注册表键存在 = 经典菜单）</summary>
+    private static bool IsWin10Style()
+    {
+        try
+        {
+            using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(
+                ClsidKeyPath + "\\" + InprocServer32SubKey);
+            return key != null;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>执行切换：写/删注册表，勾选了"立即重启资源管理器"则顺带重启</summary>
+    private void Switch(bool toWin10Style)
+    {
+        try
+        {
+            if (toWin10Style)
+            {
+                // 写入空默认值（等效 reg add ... /f /ve），屏蔽 Win11 新菜单
+                using var clsidKey = Microsoft.Win32.Registry.CurrentUser.CreateSubKey(ClsidKeyPath);
+                using var inproc = clsidKey.CreateSubKey(InprocServer32SubKey);
+                inproc.SetValue(null, string.Empty); // null = 默认值
+            }
+            else
+            {
+                // 删除整个键（等效 reg delete ... /f），恢复 Win11 新菜单
+                Microsoft.Win32.Registry.CurrentUser.DeleteSubKeyTree(ClsidKeyPath, throwOnMissingSubKey: false);
+            }
+        }
+        catch (Exception ex)
+        {
+            ToolKit.SetStatus(_result, string.Format(LocalizationService.Tr("Tools.CtxMenu.ErrReg"), ex.Message), isError: true);
+            return;
+        }
+
+        var styleNameKey = toWin10Style ? "Tools.CtxMenu.DoneWin10" : "Tools.CtxMenu.DoneWin11";
+
+        // 重启资源管理器让改动生效（桌面会短暂消失再自动出现，属正常现象）
+        if (_restartExplorer.IsChecked == true)
+        {
+            try
+            {
+                foreach (var process in Process.GetProcessesByName(ExplorerProcessName))
+                {
+                    try { process.Kill(); } catch { /* 已退出的进程忽略 */ }
+                }
+                Process.Start(new ProcessStartInfo("explorer.exe") { UseShellExecute = true });
+            }
+            catch
+            {
+                ToolKit.SetStatus(_result,
+                    LocalizationService.Tr("Tools.CtxMenu.ErrExplorer") +
+                    " " + string.Format(LocalizationService.Tr("Tools.CtxMenu.Done"), LocalizationService.Tr(styleNameKey)),
+                    isError: true);
+                UpdateStatus();
+                return;
+            }
+        }
+
+        ToolKit.SetStatus(_result, string.Format(LocalizationService.Tr("Tools.CtxMenu.Done"), LocalizationService.Tr(styleNameKey)));
+        UpdateStatus();
     }
 }
 

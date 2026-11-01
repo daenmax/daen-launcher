@@ -88,6 +88,7 @@ public static class ToolRegistry
             new ToolDefinition("wifiPassword", "Tools.WifiPassword", () => new WifiPasswordTool().Build()),
             new ToolDefinition("timeSync", "Tools.TimeSync", () => new TimeSyncTool().Build()),
             new ToolDefinition("qrCode", "Tools.QrCode", () => new QrCodeTool().Build()),
+            new ToolDefinition("contextMenuStyle", "Tools.CtxMenu", () => new ContextMenuStyleTool().Build()),
         ]),
     ];
 

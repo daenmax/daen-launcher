@@ -107,6 +107,9 @@ public sealed class LauncherItem
     /// <summary>命令行参数</summary>
     public string Arguments { get; set; } = "";
 
+    /// <summary>以管理员身份运行（仅 Exe/Lnk/File 类型有效；编辑项目弹窗中勾选）</summary>
+    public bool RunAsAdmin { get; set; }
+
     /// <summary>外部图标源路径（可选）。从 .url 快捷方式拖入时记录其 IconFile 声明
     /// （如 Steam 游戏的专属图标），图标提取时优先使用；文件消失则回退按类型提取默认图标。</summary>
     public string? IconFile { get; set; }

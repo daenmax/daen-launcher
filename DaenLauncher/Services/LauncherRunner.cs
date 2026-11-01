@@ -33,7 +33,19 @@ public static class LauncherRunner
                 case LauncherItemType.Lnk:
                 case LauncherItemType.File:
                     psi.FileName = path;
-                    if (asAdmin) psi.Verb = "runas";
+                    // 管理员权限：项目勾选了"以管理员身份运行"，或调用方临时要求管理员（右键菜单）
+                    if (asAdmin || item.RunAsAdmin) psi.Verb = "runas";
+                    // 把工作目录设为程序所在目录。有些程序用相对路径找自己的资源文件
+                    // （如字体、配置），不设的话工作目录是启动器自己的目录，会找不到文件。
+                    // .lnk 快捷方式由系统解析目标自带的工作目录，不需要设置。
+                    if (item.Type != LauncherItemType.Lnk)
+                    {
+                        var dir = System.IO.Path.GetDirectoryName(path);
+                        if (!string.IsNullOrEmpty(dir) && Directory.Exists(dir))
+                        {
+                            psi.WorkingDirectory = dir;
+                        }
+                    }
                     break;
 
                 case LauncherItemType.Folder:

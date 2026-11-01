@@ -93,6 +93,28 @@ public static class WindowPositionHelper
             area.Y + (area.Height - height) / 2);
     }
 
+    /// <summary>
+    /// 把弹窗类窗口（固定尺寸、居中显示）放到"参考窗口所在显示器"的中央，并按其 DPI 换算尺寸。
+    /// 用途：常用工具里的"管理配置"等子窗口。不指定位置时 Windows 会把新窗口默认放到
+    /// 它自己选的那块显示器（多显示器下可能跑到左侧副屏），所以必须显式定位。
+    /// </summary>
+    /// <param name="appWindow">要定位的窗口</param>
+    /// <param name="referenceHandle">参考窗口句柄（一般是父窗口，如常用工具窗口）</param>
+    /// <param name="ownHandle">自身窗口句柄（参考窗口不存在时用它）</param>
+    public static void PlaceDialogCenteredCenter(AppWindow appWindow, IntPtr referenceHandle,
+        IntPtr ownHandle, double logicalWidth, double logicalHeight)
+    {
+        var dpiHandle = referenceHandle != IntPtr.Zero ? referenceHandle : ownHandle;
+        var area = CurrentWorkArea(dpiHandle);
+        var scale = GetWindowDpiScale(dpiHandle);
+        var width = Math.Max(1, (int)Math.Round(logicalWidth * scale));
+        var height = Math.Max(1, (int)Math.Round(logicalHeight * scale));
+
+        var point = Center(area, width, height);
+        appWindow.Move(point);
+        appWindow.Resize(new SizeInt32(width, height));
+    }
+
     /// <summary>窗口当前所在显示器的工作区</summary>
     private static Windows.Graphics.RectInt32 CurrentWorkArea(IntPtr windowHandle)
     {

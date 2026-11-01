@@ -244,6 +244,13 @@ public static class Dialogs
         var remarkBox = new TextBox { PlaceholderText = LocalizationService.Tr("Dialog.ItemRemark"), Text = item.Remark };
         var argsBox = new TextBox { PlaceholderText = LocalizationService.Tr("Dialog.ItemArguments"), Text = item.Arguments };
 
+        // 以管理员身份运行（仅 Exe/Lnk/File 类型有效，默认不勾选）
+        var adminCheck = new CheckBox
+        {
+            Content = LocalizationService.Tr("Dialog.ItemRunAsAdmin"),
+            IsChecked = item.RunAsAdmin
+        };
+
         // 带标签的行：标签在上，输入框在下（需求-优化3）
         StackPanel LabeledRow(string labelKey, FrameworkElement input)
         {
@@ -266,6 +273,7 @@ public static class Dialogs
         content.Children.Add(LabeledRow("Dialog.ItemPathLabel", pathBox));
         content.Children.Add(LabeledRow("Dialog.ItemRemarkLabel", remarkBox));
         content.Children.Add(LabeledRow("Dialog.ItemArgumentsLabel", argsBox));
+        content.Children.Add(adminCheck);
 
         var dialog = new ContentDialog
         {
@@ -284,6 +292,7 @@ public static class Dialogs
         item.Path = pathBox.Text.Trim();
         item.Remark = remarkBox.Text;
         item.Arguments = argsBox.Text;
+        item.RunAsAdmin = adminCheck.IsChecked == true;
         return true;
     }
 

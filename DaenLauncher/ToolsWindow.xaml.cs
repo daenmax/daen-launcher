@@ -19,6 +19,13 @@ public sealed partial class ToolsWindow : Window
 {
     private readonly AppSettings _settings = SettingsService.Instance.Settings;
 
+    /// <summary>当前打开的常用工具窗口（配置管理等子窗口用于定位/置顶）</summary>
+    public static ToolsWindow? CurrentInstance { get; private set; }
+
+    /// <summary>窗口句柄（子窗口定位用）</summary>
+    public IntPtr WindowHandle => _hWnd;
+
+    /// <summary>窗口句柄</summary>
     private IntPtr _hWnd;
     private AppWindow _appWindow = null!;
     private OverlappedPresenter? _presenter;
@@ -48,6 +55,12 @@ public sealed partial class ToolsWindow : Window
     public ToolsWindow()
     {
         InitializeComponent();
+        CurrentInstance = this;
+        Closed += (_, _) =>
+        {
+            // 子窗口（管理配置等）用 CurrentInstance 定位，关闭后要清掉引用
+            if (ReferenceEquals(CurrentInstance, this)) CurrentInstance = null;
+        };
 
         // ===== 窗口基础设置（与剪贴板窗口一致：关闭 = 隐藏） =====
         _hWnd = WinRT.Interop.WindowNative.GetWindowHandle(this);

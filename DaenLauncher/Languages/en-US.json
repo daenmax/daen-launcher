@@ -61,6 +61,7 @@
   "Dialog.ItemPath": "Full path (URL for web items)",
   "Dialog.ItemRemark": "Remark",
   "Dialog.ItemArguments": "Command line arguments",
+  "Dialog.ItemRunAsAdmin": "Run as administrator",
   "Dialog.RestartTitle": "Restart Required",
   "Dialog.RestartContent": "This setting takes full effect after restart. Restart now?",
   "Dialog.RestartNow": "Restart Now",
@@ -744,5 +745,18 @@
   "About.Update.NetworkError": "Unable to fetch release information. Check your network or proxy settings",
   "About.Update.DirNotWritable": "The app folder is not writable, so it cannot update automatically. Please download the new version manually",
   "About.Update.BackgroundDownloading": "Downloading update {0} in the background… {1}%",
-  "About.Update.BackgroundDownloadingUnknown": "Downloading update {0} in the background…"
+  "About.Update.BackgroundDownloadingUnknown": "Downloading update {0} in the background…",
+  "Tools.Qr.ErrTooLong": "Content is too long for a QR code (~2900 bytes). Shorten it or lower the error correction level",
+  "Tools.CtxMenu": "Win11 menu style switch",
+  "Tools.CtxMenu.Desc": "Switch between the new Win11 context menu and the classic Win10 context menu by editing the registry key HKCU\\Software\\Classes\\CLSID\\{86ca1aa0-34aa-4e8b-a509-50c905bae2a2}. Explorer must restart for the change to take effect (the desktop will briefly disappear and come back, which is normal)",
+  "Tools.CtxMenu.CurrentWin11": "Current: Win11 new menu",
+  "Tools.CtxMenu.CurrentWin10": "Current: Win10 classic menu",
+  "Tools.CtxMenu.RestartExplorer": "Restart explorer immediately after switching",
+  "Tools.CtxMenu.ToWin10": "Switch to Win10 classic menu",
+  "Tools.CtxMenu.ToWin11": "Restore Win11 new menu",
+  "Tools.CtxMenu.Done": "Done. Context menu switched to {0}",
+  "Tools.CtxMenu.DoneWin10": "Win10 classic menu",
+  "Tools.CtxMenu.DoneWin11": "Win11 new menu",
+  "Tools.CtxMenu.ErrReg": "Failed to modify the registry: {0}",
+  "Tools.CtxMenu.ErrExplorer": "Failed to restart explorer. Please restart explorer.exe manually from Task Manager."
 }
