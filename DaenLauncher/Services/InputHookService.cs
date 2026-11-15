@@ -19,7 +19,9 @@ public sealed class InputHookService : IDisposable
     private const int WM_XBUTTONDOWN = 0x020B;
     private const int WM_MBUTTONDOWN = 0x0207;
     private const int WM_KEYDOWN = 0x0100;
+    private const int WM_KEYUP = 0x0101;
     private const int WM_SYSKEYDOWN = 0x0104;
+    private const int WM_SYSKEYUP = 0x0105;
 
     [StructLayout(LayoutKind.Sequential)]
     private struct KBDLLHOOKSTRUCT
@@ -87,6 +89,10 @@ public sealed class InputHookService : IDisposable
     private uint _lastCtrlTime;
     private uint _lastAltTime;
 
+    // 当前处于"按住"状态的按键（虚拟键码）。
+    // 作用：过滤长按产生的自动重复 WM_KEYDOWN，否则按住 Ctrl/Alt 会每 ~30ms 触发一次"双击"
+    private readonly HashSet<int> _pressedKeys = new();
+
     private uint LastInputTick => (uint)Environment.TickCount;
 
     /// <summary>根据设置更新钩子（只装需要的钩子）</summary>
@@ -119,6 +125,8 @@ public sealed class InputHookService : IDisposable
 
     private void InstallKeyboardHook()
     {
+        // 重新安装钩子时清空按键状态，避免上一次安装期间残留的"按住"状态导致漏触发
+        _pressedKeys.Clear();
         _keyboardProc = KeyboardHookProc;
         _keyboardHook = SetWindowsHookEx(WH_KEYBOARD_LL, _keyboardProc, GetModuleHandle(null), 0);
     }
@@ -168,33 +176,52 @@ public sealed class InputHookService : IDisposable
         if (nCode >= 0 && App.UiDispatcherQueue != null)
         {
             var msg = wParam.ToInt32();
-            if (msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN)
+
+            // 松开按键：记录该键已抬起，使下次按下可以被识别为一次新的"单击"
+            if (msg == WM_KEYUP || msg == WM_SYSKEYUP)
+            {
+                var upData = Marshal.PtrToStructure<KBDLLHOOKSTRUCT>(lParam);
+                _pressedKeys.Remove((int)upData.vkCode);
+            }
+            else if (msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN)
             {
                 var data = Marshal.PtrToStructure<KBDLLHOOKSTRUCT>(lParam);
-                var settings = SettingsService.Instance.Settings;
-                bool hit = false;
+                int vkCode = (int)data.vkCode;
 
-                if ((data.vkCode == VK_CONTROL || data.vkCode == VK_LCONTROL || data.vkCode == VK_RCONTROL)
-                    && settings.TriggerCtrlTwice)
-                {
-                    var now = LastInputTick;
-                    if (now - _lastCtrlTime <= DoubleTapWindowMs && _lastCtrlTime != 0) hit = true;
-                    _lastCtrlTime = now;
-                }
-                else if ((data.vkCode == VK_MENU || data.vkCode == VK_LMENU || data.vkCode == VK_RMENU)
-                    && settings.TriggerAltTwice)
-                {
-                    var now = LastInputTick;
-                    if (now - _lastAltTime <= DoubleTapWindowMs && _lastAltTime != 0) hit = true;
-                    _lastAltTime = now;
-                }
+                bool isCtrl = vkCode == VK_CONTROL || vkCode == VK_LCONTROL || vkCode == VK_RCONTROL;
+                bool isAlt = vkCode == VK_MENU || vkCode == VK_LMENU || vkCode == VK_RMENU;
 
-                if (hit)
+                if (isCtrl || isAlt)
                 {
-                    // 重置，防止连续多次触发
-                    _lastCtrlTime = 0;
-                    _lastAltTime = 0;
-                    App.UiDispatcherQueue.TryEnqueue(() => ToggleRequested?.Invoke());
+                    // 长按不松手时系统会不断发送同一个 WM_KEYDOWN（自动重复），
+                    // 这类重复事件并不是"又按了一次"，必须忽略，否则会反复切换显示/隐藏。
+                    bool isNewPress = _pressedKeys.Add(vkCode);
+
+                    if (isNewPress)
+                    {
+                        var settings = SettingsService.Instance.Settings;
+                        bool hit = false;
+                        var now = LastInputTick;
+
+                        if (isCtrl && settings.TriggerCtrlTwice)
+                        {
+                            if (_lastCtrlTime != 0 && now - _lastCtrlTime <= DoubleTapWindowMs) hit = true;
+                            _lastCtrlTime = now;
+                        }
+                        else if (isAlt && settings.TriggerAltTwice)
+                        {
+                            if (_lastAltTime != 0 && now - _lastAltTime <= DoubleTapWindowMs) hit = true;
+                            _lastAltTime = now;
+                        }
+
+                        if (hit)
+                        {
+                            // 重置，防止下一次按下与本次残留时间组成新的"双击"
+                            _lastCtrlTime = 0;
+                            _lastAltTime = 0;
+                            App.UiDispatcherQueue.TryEnqueue(() => ToggleRequested?.Invoke());
+                        }
+                    }
                 }
             }
         }

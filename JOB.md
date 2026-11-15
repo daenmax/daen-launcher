@@ -984,3 +984,20 @@ build.bat / clean.bat   双击可用的编译/清理脚本
 - **右键菜单风格检测**：以 `InprocServer32` 子键是否存在判断当前是否 Win10 经典菜单（reg add 创建的就是这个子键）。
 - **切 Win10 用 `CreateSubKey + SetValue(null, "")`** 等效 `reg add ... /f /ve`；切回 Win11 用 `DeleteSubKeyTree` 整键删除，等效 `reg delete ... /f`。
 - **工作目录只对 Exe/File 设置**：File 类型（文档等）工作目录设为其所在目录无害；Lnk 交给系统；Uwp/Url/Protocol 无本地路径。
+
+## 最新变更（2026-11-15 第六十五轮：修复长按 Ctrl/Alt 反复触发显示隐藏，版本 1.7.0）
+
+### 本轮改动
+1. **修复启动器"按 Ctrl 键两次 / 按 Alt 键两次"长按反复切换**（`Services/InputHookService.cs`）
+   - 现象：勾选两个选项后长按 Ctrl/Alt 不松手，窗口反复隐藏/显示。
+   - 根因：低级键盘钩子会把长按产生的**自动重复 WM_KEYDOWN**（约每 30ms 一次，同一 vkCode）当成新的"按下"；原逻辑每次按下都与上次时间戳比较，且命中后只把时间戳清零，下一次重复事件立即又记录时间，下下次即再次命中 → 无限循环触发。
+   - 修复：新增 `_pressedKeys`（HashSet<int>）记录当前按住的虚拟键码；收到 `WM_KEYDOWN/WM_SYSKEYDOWN` 时先 `Add`，**不是新按下（自动重复）直接忽略**；收到 `WM_KEYUP/WM_SYSKEYUP` 时 `Remove`。重新安装键盘钩子时清空该集合，防止状态残留。
+2. 版本号 → **1.7.0**，新增 `updateLog/1.7.0_zh_cn.md`、`1.7.0_en_us.md`。
+
+### 当前进度（本轮后）
+- 已完成：上述修复，仅改动 1 个源文件 + 版本号 + 更新日志。
+- 未实测（需用户验收）：长按 Ctrl/Alt 是否只触发一次；正常双击 Ctrl/Alt、鼠标侧键/中键仍能正常切换。
+
+### 关键决策 / 踩坑（本轮）
+- **低级键盘钩子必须区分"按键按下"与"自动重复"**：不能只靠时间窗口判双击，否则任何长按都会变成连续双击。用 `按下集合 + KEYUP 移除` 是最轻量可靠的方案（无需 `GetAsyncKeyState`，也不受钩子回调延迟影响）。
+- 若未来新增其他双击类热键（如 Shift 两次），必须复用同一套 `_pressedKeys` 过滤逻辑，并同步处理对应 KEYUP。
